@@ -1,0 +1,73 @@
+# Claude / AI assistant
+.claude/
+.claude*
+*claude*
+**/.claude/
+**/.claude*
+PLAN.md
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+binReleasepublish/
+
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+*.sln.iml
+
+# User-specific
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+[Dd]ebugPublic/
+*.trx
+*.coverage
+*.coveragexml
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+nul
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Misc
+*.cache
+*.log
+*.tmp
+*.temp
+*.swp
+*~

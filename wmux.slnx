@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="wmux.csproj" />
+  <Project Path="wmux.Tests/wmux.Tests.csproj" />
+</Solution>
