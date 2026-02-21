@@ -5,8 +5,8 @@ using PaneBorder = Wmux.UI.PaneBorder;
 namespace Wmux.Server;
 
 /// <summary>
-/// Server-side grid compositor. Builds the same character grid as GuiRenderer
-/// but packs it into a ScreenSnapshotMessage for sending over IPC to clients.
+/// Server-side grid compositor. Builds a character grid and packs it into
+/// a ScreenSnapshotMessage for sending over IPC to clients.
 /// </summary>
 public static class ServerRenderer
 {

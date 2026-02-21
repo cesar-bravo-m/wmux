@@ -19,7 +19,6 @@ public class WmuxConfigTests
     public void DefaultConfig_HasValidKeyBindings()
     {
         var config = WmuxConfig.Load();
-        Assert.That(config.Keys.PrefixKey, Is.EqualTo(ConsoleKey.A));
-        Assert.That(config.Keys.PrefixModifier, Is.EqualTo(ConsoleModifiers.Control));
+        Assert.That(config.Keys.ActivationString, Is.EqualTo("za"));
     }
 }

@@ -99,7 +99,12 @@ public class Window : IDisposable
             };
 
             if (!valid) continue;
-            int dist = Math.Abs(px - cx) + Math.Abs(py - cy);
+            // Weight cross-axis distance heavily so navigation prefers panes
+            // aligned in the direction of travel (e.g., Right prefers same row)
+            bool isHorizontal = direction is ConsoleKey.LeftArrow or ConsoleKey.RightArrow;
+            int primaryDelta = isHorizontal ? Math.Abs(px - cx) : Math.Abs(py - cy);
+            int crossDelta = isHorizontal ? Math.Abs(py - cy) : Math.Abs(px - cx);
+            int dist = crossDelta * 1000 + primaryDelta;
             if (dist < bestDist)
             {
                 bestDist = dist;

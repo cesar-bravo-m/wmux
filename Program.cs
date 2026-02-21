@@ -1,4 +1,4 @@
-using System.Windows.Forms;
+using System.Net.Sockets;
 using Wmux.Client;
 using Wmux.Config;
 using Wmux.Server;
@@ -7,50 +7,68 @@ namespace Wmux;
 
 static class Program
 {
-    /// <summary>
-    /// CRITICAL: [STAThread] is required for WinForms. Without it, the message
-    /// pump runs on an MTA thread, causing Application.Run to malfunction —
-    /// the window hangs, keyboard events are not dispatched through WndProc,
-    /// and control keys like Ctrl+B are passed through instead of intercepted.
-    ///
-    /// Top-level statements do NOT get [STAThread] injected automatically,
-    /// even with UseWindowsForms in the csproj. This explicit Main is required.
-    /// </summary>
-    [STAThread]
     static int Main(string[] args)
     {
-        Application.EnableVisualStyles();
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-
         var config = WmuxConfig.Load();
+
+        // Parse global options (before the sub-command)
+        var remaining = new List<string>();
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] is "--activate" or "-A")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("Error: --activate requires a value.");
+                    return 1;
+                }
+                string act = args[++i];
+                if (act.Length < 2)
+                {
+                    Console.Error.WriteLine("Error: activation string must be at least 2 characters.");
+                    return 1;
+                }
+                foreach (char c in act)
+                {
+                    if (c < ' ' || char.IsControl(c))
+                    {
+                        Console.Error.WriteLine("Error: activation string must contain only printable characters (no Control keys).");
+                        return 1;
+                    }
+                }
+                config.Keys.ActivationString = act;
+            }
+            else
+            {
+                remaining.Add(args[i]);
+            }
+        }
+        args = remaining.ToArray();
 
         if (args.Length == 0)
         {
             // Default: start embedded server (if needed) + attach as first client
-            if (!WmuxServer.IsServerRunning())
+            int port = WmuxServer.GetServerPort();
+            if (port <= 0)
             {
                 var server = new WmuxServer { EmbeddedMode = true };
                 var serverTask = Task.Run(() => server.RunAsync());
 
                 // Wait for the server to create its pipe before the client tries to connect.
-                // Without this, the client races the server and pipe.Connect can timeout.
                 if (!server.Ready.Wait(5000))
                 {
-                    // Server failed to start — check if the task faulted
                     if (serverTask.IsFaulted)
-                    {
                         Console.Error.WriteLine($"wmux server failed to start: {serverTask.Exception?.InnerException?.Message}");
-                    }
                     else
-                    {
                         Console.Error.WriteLine("wmux server did not become ready within 5 seconds.");
-                    }
                     return 1;
                 }
+
+                port = server.Port;
             }
 
-            var client = new WmuxGuiClient(config);
-            client.AttachToServer(mode: ClientMode.CreateOrAttach);
+            var client = new WmuxClient(config);
+            client.AttachToServer(mode: ClientMode.CreateOrAttach, port: port);
             return 0;
         }
 
@@ -68,7 +86,8 @@ static class Program
                 }
 
                 // Start embedded server if not running
-                if (!WmuxServer.IsServerRunning())
+                int port = WmuxServer.GetServerPort();
+                if (port <= 0)
                 {
                     var server = new WmuxServer { EmbeddedMode = true };
                     var serverTask = Task.Run(() => server.RunAsync());
@@ -81,10 +100,12 @@ static class Program
                             Console.Error.WriteLine("wmux server did not become ready within 5 seconds.");
                         return 1;
                     }
+
+                    port = server.Port;
                 }
 
-                var client = new WmuxGuiClient(config);
-                client.AttachToServer(name, ClientMode.ForceCreate);
+                var client = new WmuxClient(config);
+                client.AttachToServer(name, ClientMode.ForceCreate, port);
                 return 0;
             }
 
@@ -99,14 +120,15 @@ static class Program
                         name = args[i]; // positional: wmux attach 0
                 }
 
-                if (!WmuxServer.IsServerRunning())
+                int port = WmuxServer.GetServerPort();
+                if (port <= 0)
                 {
                     Console.Error.WriteLine("No wmux server running. Run 'wmux' first.");
                     return 1;
                 }
 
-                var client2 = new WmuxGuiClient(config);
-                client2.AttachToServer(name, ClientMode.Attach);
+                var client2 = new WmuxClient(config);
+                client2.AttachToServer(name, ClientMode.Attach, port);
                 return 0;
             }
 
@@ -118,30 +140,31 @@ static class Program
                     return 1;
                 }
                 var server = new WmuxServer();
-                // RunAsync for standalone server is fine — no WinForms here
                 server.RunAsync().GetAwaiter().GetResult();
                 return 0;
             }
 
             case "list-sessions" or "list-session" or "ls":
             {
-                if (!WmuxServer.IsServerRunning())
+                int port = WmuxServer.GetServerPort();
+                if (port <= 0)
                 {
-                    Console.Error.WriteLine($"no server running on \\\\.\\pipe\\{WmuxServer.PipeName}");
+                    Console.Error.WriteLine("no server running on localhost");
                     return 1;
                 }
-                ListSessions();
+                ListSessions(port);
                 return 0;
             }
 
             case "kill-server":
             {
-                if (!WmuxServer.IsServerRunning())
+                int port = WmuxServer.GetServerPort();
+                if (port <= 0)
                 {
                     Console.Error.WriteLine("No wmux server running.");
                     return 1;
                 }
-                KillServer();
+                KillServer(port);
                 return 0;
             }
 
@@ -161,12 +184,14 @@ static class Program
         }
     }
 
-    static void ListSessions()
+    static void ListSessions(int port)
     {
-        using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", WmuxServer.PipeName, System.IO.Pipes.PipeDirection.InOut);
-        pipe.Connect(3000);
-        IpcProtocol.Send(pipe, new SessionInfoMessage());
-        var response = IpcProtocol.Receive(pipe);
+        using var tcp = new TcpClient();
+        tcp.Connect("127.0.0.1", port);
+        tcp.NoDelay = true;
+        var stream = tcp.GetStream();
+        IpcProtocol.Send(stream, new SessionInfoMessage());
+        var response = IpcProtocol.Receive(stream);
         if (response is SessionListMessage list)
         {
             if (list.Sessions.Count == 0)
@@ -183,11 +208,13 @@ static class Program
         }
     }
 
-    static void KillServer()
+    static void KillServer(int port)
     {
-        using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", WmuxServer.PipeName, System.IO.Pipes.PipeDirection.InOut);
-        pipe.Connect(3000);
-        IpcProtocol.Send(pipe, new KillServerMessage());
+        using var tcp = new TcpClient();
+        tcp.Connect("127.0.0.1", port);
+        tcp.NoDelay = true;
+        var stream = tcp.GetStream();
+        IpcProtocol.Send(stream, new KillServerMessage());
         Console.WriteLine("wmux server killed.");
     }
 
@@ -196,15 +223,25 @@ static class Program
         Console.WriteLine(@"wmux - Terminal Multiplexer for Windows
 
 Usage:
-  wmux                        Start server + create/attach session ""0""
-  wmux new-session [-s name]  Create a new session (auto-named 0,1,2,...)
-  wmux attach [name] [-t name]  Attach to an existing session
-  wmux start-server           Start a standalone background server
-  wmux list-sessions          List server sessions
-  wmux kill-server            Stop the server
-  wmux help                   Show this help
+  wmux [options]                        Start server + create/attach session ""0""
+  wmux [options] new-session [-s name]  Create a new session
+  wmux [options] attach [name] [-t name]  Attach to an existing session
+  wmux start-server                     Start a standalone background server
+  wmux list-sessions                    List server sessions
+  wmux kill-server                      Stop the server
+  wmux help                             Show this help
 
-Key Bindings (after Ctrl+A prefix):
+Options:
+  --activate <str>, -A <str>  Set the activation string (default: ""za"").
+                              Must be at least 2 printable characters.
+                              Cannot contain Control keys.
+
+Activation String:
+  The activation string (default ""za"") enters prefix mode. Type the
+  activation string followed by a command key. For example, with the
+  default ""za"", type z then a then c to create a new window.
+
+Key Bindings (after activation string):
   s / S     Split pane horizontally (top/bottom)
   | / v     Split pane vertically (left/right)
   Arrow     Navigate between panes
@@ -218,8 +255,6 @@ Key Bindings (after Ctrl+A prefix):
   &         Kill window
   o         Next pane
   Space     Cycle layout presets
-
-Ctrl+D      Close current pane (or window/session if last pane)
 
 Command Mode:
   split-window [-h|-v]    Split the current pane

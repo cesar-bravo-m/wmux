@@ -1,14 +1,18 @@
 namespace Wmux.Config;
 
 /// <summary>
-/// Defines the key bindings for wmux. Matches tmux defaults.
+/// Defines the key bindings for wmux.
 /// </summary>
 public class KeyBindings
 {
-    public ConsoleModifiers PrefixModifier { get; set; } = ConsoleModifiers.Control;
-    public ConsoleKey PrefixKey { get; set; } = ConsoleKey.A;
+    /// <summary>
+    /// The activation string that enters prefix mode.
+    /// Must be at least 2 printable characters, no control keys.
+    /// Default is "za" — type z then a to activate, then the command key.
+    /// </summary>
+    public string ActivationString { get; set; } = "za";
 
-    // After prefix:
+    // After activation:
     public char SplitHorizontal { get; set; } = 's';
     public char SplitVertical { get; set; } = '|';
     public char NewWindow { get; set; } = 'c';
@@ -22,9 +26,4 @@ public class KeyBindings
     public char KillWindow { get; set; } = '&';
     public char NextPane { get; set; } = 'o';
     public char CycleLayout { get; set; } = ' ';
-
-    public bool IsPrefixKey(ConsoleKeyInfo key)
-    {
-        return key.Key == PrefixKey && key.Modifiers == PrefixModifier;
-    }
 }

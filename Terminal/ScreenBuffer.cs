@@ -29,6 +29,7 @@ public class ScreenBuffer
     private ConsoleColor _currentFg = ConsoleColor.Gray;
     private ConsoleColor _currentBg = ConsoleColor.Black;
     private bool _currentBold = false;
+    private bool _currentDim = false;
 
     public ScreenBuffer(int width, int height)
     {
@@ -120,7 +121,7 @@ public class ScreenBuffer
         if (CursorRow >= 0 && CursorRow < Height && CursorCol >= 0 && CursorCol < Width)
         {
             Chars[CursorRow][CursorCol] = ch;
-            FgColors[CursorRow][CursorCol] = _currentFg;
+            FgColors[CursorRow][CursorCol] = _currentDim ? DimColor(_currentFg) : _currentFg;
             BgColors[CursorRow][CursorCol] = _currentBg;
             Bold[CursorRow][CursorCol] = _currentBold;
         }
@@ -360,7 +361,8 @@ public class ScreenBuffer
             {
                 case 0: ResetAttributes(); break;
                 case 1: _currentBold = true; break;
-                case 22: _currentBold = false; break;
+                case 2: _currentDim = true; break;
+                case 22: _currentBold = false; _currentDim = false; break;
                 case 7: // Reverse video
                     (_currentFg, _currentBg) = (_currentBg, _currentFg);
                     break;
@@ -435,7 +437,21 @@ public class ScreenBuffer
         _currentFg = ConsoleColor.Gray;
         _currentBg = ConsoleColor.Black;
         _currentBold = false;
+        _currentDim = false;
     }
+
+    private static ConsoleColor DimColor(ConsoleColor c) => c switch
+    {
+        ConsoleColor.White => ConsoleColor.DarkGray,
+        ConsoleColor.Gray => ConsoleColor.DarkGray,
+        ConsoleColor.Red => ConsoleColor.DarkRed,
+        ConsoleColor.Green => ConsoleColor.DarkGreen,
+        ConsoleColor.Yellow => ConsoleColor.DarkYellow,
+        ConsoleColor.Blue => ConsoleColor.DarkBlue,
+        ConsoleColor.Magenta => ConsoleColor.DarkMagenta,
+        ConsoleColor.Cyan => ConsoleColor.DarkCyan,
+        _ => c // Already dark or black
+    };
 
     private static ConsoleColor Map256ToConsoleColor(int color)
     {

@@ -95,6 +95,14 @@ internal static class ConPtyNative
         IntPtr hConsoleInput,
         out uint lpcNumberOfEvents);
 
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "WriteConsoleInputW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool WriteConsoleInput(
+        IntPtr hConsoleInput,
+        INPUT_RECORD[] lpBuffer,
+        uint nLength,
+        out uint lpNumberOfEventsWritten);
+
     internal const int STD_INPUT_HANDLE = -10;
     internal const int STD_OUTPUT_HANDLE = -11;
 
@@ -117,6 +125,7 @@ internal static class ConPtyNative
     internal const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     internal const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016; // 131094
     internal const uint INFINITE = 0xFFFFFFFF;
+    internal const uint WAIT_TIMEOUT = 0x00000102;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct COORD

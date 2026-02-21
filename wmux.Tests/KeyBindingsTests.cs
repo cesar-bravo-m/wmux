@@ -14,10 +14,9 @@ public class KeyBindingsTests
     }
 
     [Test]
-    public void Defaults_PrefixIsCtrlA()
+    public void Defaults_ActivationStringIsZA()
     {
-        Assert.That(_keys.PrefixModifier, Is.EqualTo(ConsoleModifiers.Control));
-        Assert.That(_keys.PrefixKey, Is.EqualTo(ConsoleKey.A));
+        Assert.That(_keys.ActivationString, Is.EqualTo("za"));
     }
 
     [Test]
@@ -54,46 +53,16 @@ public class KeyBindingsTests
     }
 
     [Test]
-    public void IsPrefixKey_MatchesCtrlA()
+    public void ActivationString_CanBeChanged()
     {
-        var key = new ConsoleKeyInfo('\x01', ConsoleKey.A, false, false, true);
-        Assert.That(_keys.IsPrefixKey(key), Is.True);
+        _keys.ActivationString = "qq";
+        Assert.That(_keys.ActivationString, Is.EqualTo("qq"));
     }
 
     [Test]
-    public void IsPrefixKey_DoesNotMatchPlainA()
+    public void ActivationString_CanBeLonger()
     {
-        var key = new ConsoleKeyInfo('a', ConsoleKey.A, false, false, false);
-        Assert.That(_keys.IsPrefixKey(key), Is.False);
-    }
-
-    [Test]
-    public void IsPrefixKey_DoesNotMatchCtrlB()
-    {
-        var key = new ConsoleKeyInfo('\x02', ConsoleKey.B, false, false, true);
-        Assert.That(_keys.IsPrefixKey(key), Is.False);
-    }
-
-    [Test]
-    public void IsPrefixKey_CustomPrefixKey()
-    {
-        _keys.PrefixKey = ConsoleKey.A;
-        var key = new ConsoleKeyInfo('\x01', ConsoleKey.A, false, false, true);
-        Assert.That(_keys.IsPrefixKey(key), Is.True);
-    }
-
-    [Test]
-    public void IsPrefixKey_DoesNotMatchWithShift()
-    {
-        // Ctrl+Shift+A should not match plain Ctrl+A
-        var key = new ConsoleKeyInfo('\x01', ConsoleKey.A, true, false, true);
-        Assert.That(_keys.IsPrefixKey(key), Is.False);
-    }
-
-    [Test]
-    public void IsPrefixKey_DoesNotMatchWithAlt()
-    {
-        var key = new ConsoleKeyInfo('\x01', ConsoleKey.A, false, true, true);
-        Assert.That(_keys.IsPrefixKey(key), Is.False);
+        _keys.ActivationString = "wmux";
+        Assert.That(_keys.ActivationString, Is.EqualTo("wmux"));
     }
 }

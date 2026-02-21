@@ -31,19 +31,18 @@ public static class RawConsole
             return false;
 
         // Raw input: nothing echoed, nothing buffered, nothing processed.
-        // Keep WINDOW_INPUT so we still get resize events, and
-        // VIRTUAL_TERMINAL_INPUT so the console translates keys into VT seqs.
+        // Keep WINDOW_INPUT so we still get resize events.
+        // Do NOT set ENABLE_VIRTUAL_TERMINAL_INPUT — that flag causes Windows
+        // to split special keys (arrows, F-keys) into individual VT character
+        // events via ReadConsoleInput, which conflicts with Win32InputReader +
+        // KeyToVtSequence already doing the conversion. The split events arrive
+        // as separate writes to ConPTY with timing gaps, causing PSReadLine to
+        // treat the ESC as standalone and echo the rest as literal text.
         uint rawInput = ENABLE_WINDOW_INPUT
-                      | ENABLE_VIRTUAL_TERMINAL_INPUT
                       | ENABLE_EXTENDED_FLAGS; // required to clear QUICK_EDIT
 
         if (!SetConsoleMode(_inputHandle, rawInput))
-        {
-            // Older Windows 10 builds lack VIRTUAL_TERMINAL_INPUT – retry without it.
-            rawInput &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
-            if (!SetConsoleMode(_inputHandle, rawInput))
-                return false;
-        }
+            return false;
 
         // Output: enable VT processing so our ANSI sequences are rendered,
         // and DISABLE_NEWLINE_AUTO_RETURN for correct bottom-right-corner writes.

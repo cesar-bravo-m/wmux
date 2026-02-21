@@ -32,12 +32,38 @@ public sealed class Win32InputReader : IDisposable
     /// <summary>
     /// Blocking read that returns the next key-down event as a ConsoleKeyInfo.
     /// Also dispatches WindowResized events if a resize record is encountered.
-    /// This method blocks until a key-down event is available.
+    /// When timeoutMs is -1 (default), blocks indefinitely until a key is available.
+    /// When timeoutMs >= 0, returns null if no key arrives within the timeout.
     /// </summary>
-    public ConsoleKeyInfo? ReadKey()
+    public ConsoleKeyInfo? ReadKey(int timeoutMs = -1)
     {
+        long deadline = timeoutMs >= 0
+            ? Environment.TickCount64 + timeoutMs
+            : long.MaxValue;
+
         while (!_disposed)
         {
+            // Compute remaining wait time
+            uint waitMs;
+            if (timeoutMs < 0)
+            {
+                waitMs = INFINITE;
+            }
+            else
+            {
+                long remaining = deadline - Environment.TickCount64;
+                if (remaining <= 0)
+                    return null; // Timed out
+                waitMs = (uint)remaining;
+            }
+
+            uint waitResult = WaitForSingleObject(_inputHandle, waitMs);
+            if (_disposed) return null;
+            if (waitResult == WAIT_TIMEOUT)
+                return null;
+            if (waitResult != 0) // WAIT_FAILED or other error
+                return null;
+
             if (!ReadConsoleInput(_inputHandle, _buffer, 1, out uint eventsRead))
                 return null;
 
@@ -193,6 +219,15 @@ public sealed class Win32InputReader : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
         _disposed = true;
+
+        // Inject a dummy key event to unblock the blocking ReadConsoleInput call.
+        var dummy = new INPUT_RECORD
+        {
+            EventType = KEY_EVENT,
+            KeyEvent = new KEY_EVENT_RECORD { bKeyDown = 1, wVirtualKeyCode = 0 }
+        };
+        WriteConsoleInput(_inputHandle, [dummy], 1, out _);
     }
 }

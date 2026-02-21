@@ -1,5 +1,6 @@
 using System.Text;
 using Wmux.Core;
+using Wmux.Server;
 using StatusBar = Wmux.UI.StatusBar;
 using PaneBorder = Wmux.UI.PaneBorder;
 
@@ -30,16 +31,19 @@ public class Renderer
         _prevChars = null; // Force full redraw
     }
 
-    public void Render(Session session, string? commandInput = null)
+    /// <summary>
+    /// Render a local Session to the terminal (standalone mode).
+    /// </summary>
+    public void Render(Session session, string? commandInput = null,
+        ConsoleColor statusFg = ConsoleColor.Black, ConsoleColor statusBg = ConsoleColor.Green,
+        bool commandMode = false)
     {
         var window = session.ActiveWindow;
         var panes = window.GetPanes();
         var activePane = window.ActivePane;
 
-        // Usable height (reserve 1 row for status bar)
         int usableHeight = _height - 1;
 
-        // Build the character grid
         var chars = new char[_height, _width];
         var fg = new ConsoleColor[_height, _width];
         var bg = new ConsoleColor[_height, _width];
@@ -53,32 +57,153 @@ public class Renderer
                 bg[y, x] = ConsoleColor.Black;
             }
 
-        // Draw pane borders
         PaneBorder.DrawBorders(chars, fg, panes, activePane, _width, usableHeight);
 
-        // Render each pane's content
         foreach (var pane in panes)
         {
             RenderPaneToGrid(pane, chars, fg, bg, pane.Left, pane.Top, pane.Width, pane.Height);
         }
 
-        // Build the output using differential updates
+        // Render status bar on the last row
+        string statusStr = StatusBar.RenderPlain(session, _width, commandInput);
+        for (int x = 0; x < Math.Min(statusStr.Length, _width); x++)
+        {
+            chars[_height - 1, x] = statusStr[x];
+            fg[_height - 1, x] = statusFg;
+            bg[_height - 1, x] = statusBg;
+        }
+        for (int x = statusStr.Length; x < _width; x++)
+        {
+            chars[_height - 1, x] = ' ';
+            fg[_height - 1, x] = statusFg;
+            bg[_height - 1, x] = statusBg;
+        }
+
+        // Command mode: draw a non-blinking block cursor on the status bar
+        if (commandMode)
+        {
+            int cmdCursorX = 1 + (commandInput?.Length ?? 0);
+            if (cmdCursorX < _width)
+            {
+                bg[_height - 1, cmdCursorX] = ConsoleColor.Black;
+                fg[_height - 1, cmdCursorX] = statusBg;
+            }
+        }
+
+        int cursorRow = activePane.Top + activePane.Screen.CursorRow;
+        int cursorCol = activePane.Left + activePane.Screen.CursorCol;
+        bool cursorVisible = commandMode ? false : activePane.Screen.CursorVisible;
+
+        FlushToTerminal(chars, fg, bg, cursorRow, cursorCol, cursorVisible);
+    }
+
+    /// <summary>
+    /// Render a ScreenSnapshotMessage from the server to the terminal (server mode).
+    /// </summary>
+    public void RenderSnapshot(ScreenSnapshotMessage snapshot,
+        string? commandInput = null, string? statusOverlay = null,
+        ConsoleColor statusFg = ConsoleColor.Black, ConsoleColor statusBg = ConsoleColor.Green,
+        bool commandMode = false)
+    {
+        int w = snapshot.Width;
+        int h = snapshot.Height;
+
+        // Use the renderer's dimensions (actual terminal size)
+        int renderW = _width;
+        int renderH = _height;
+
+        var chars = new char[renderH, renderW];
+        var fg = new ConsoleColor[renderH, renderW];
+        var bg = new ConsoleColor[renderH, renderW];
+
+        // Fill with spaces
+        for (int y = 0; y < renderH; y++)
+            for (int x = 0; x < renderW; x++)
+            {
+                chars[y, x] = ' ';
+                fg[y, x] = ConsoleColor.Gray;
+                bg[y, x] = ConsoleColor.Black;
+            }
+
+        // Unpack the snapshot grid
+        for (int y = 0; y < Math.Min(h, renderH); y++)
+        {
+            for (int x = 0; x < Math.Min(w, renderW); x++)
+            {
+                int idx = y * w + x;
+                chars[y, x] = idx < snapshot.Chars.Length ? snapshot.Chars[idx] : ' ';
+                fg[y, x] = idx < snapshot.Fg.Length ? (ConsoleColor)snapshot.Fg[idx] : ConsoleColor.Gray;
+                bg[y, x] = idx < snapshot.Bg.Length ? (ConsoleColor)snapshot.Bg[idx] : ConsoleColor.Black;
+            }
+        }
+
+        // Overlay command-line prompt if active (client-local state)
+        if (commandMode && commandInput != null)
+        {
+            string cmdLine = $":{commandInput}";
+            int statusRow = renderH - 1;
+            if (statusRow >= 0)
+            {
+                for (int x = 0; x < renderW; x++)
+                {
+                    chars[statusRow, x] = x < cmdLine.Length ? cmdLine[x] : ' ';
+                    fg[statusRow, x] = ConsoleColor.Black;
+                    bg[statusRow, x] = ConsoleColor.Yellow;
+                }
+                // Non-blinking block cursor after typed text
+                int cursorX = cmdLine.Length;
+                if (cursorX < renderW)
+                {
+                    bg[statusRow, cursorX] = ConsoleColor.Black;
+                    fg[statusRow, cursorX] = ConsoleColor.Yellow;
+                }
+            }
+        }
+        else if (statusOverlay != null)
+        {
+            int statusRow = renderH - 1;
+            if (statusRow >= 0)
+            {
+                for (int x = 0; x < renderW; x++)
+                {
+                    chars[statusRow, x] = x < statusOverlay.Length ? statusOverlay[x] : ' ';
+                    fg[statusRow, x] = statusFg;
+                    bg[statusRow, x] = statusBg;
+                }
+            }
+        }
+
+        int cursorRow = snapshot.CursorRow;
+        int cursorCol = snapshot.CursorCol;
+        bool cursorVisible = commandMode ? false : snapshot.CursorVisible;
+
+        FlushToTerminal(chars, fg, bg, cursorRow, cursorCol, cursorVisible);
+    }
+
+    /// <summary>
+    /// Diff the current grid against the previous one and flush ANSI to stdout.
+    /// </summary>
+    private void FlushToTerminal(char[,] chars, ConsoleColor[,] fg, ConsoleColor[,] bg,
+        int cursorRow, int cursorCol, bool cursorVisible)
+    {
+        int h = chars.GetLength(0);
+        int w = chars.GetLength(1);
+
         var sb = new StringBuilder(4096);
 
         // Hide cursor during render
         sb.Append("\x1b[?25l");
 
-        bool fullRedraw = _prevChars == null || _prevChars.GetLength(0) != _height || _prevChars.GetLength(1) != _width;
+        bool fullRedraw = _prevChars == null || _prevChars.GetLength(0) != h || _prevChars.GetLength(1) != w;
 
         if (fullRedraw)
         {
-            // Full screen redraw
             sb.Append("\x1b[2J"); // Clear screen
-            for (int y = 0; y < usableHeight; y++)
+            for (int y = 0; y < h; y++)
             {
-                sb.Append($"\x1b[{y + 1};1H"); // Move to row
+                sb.Append($"\x1b[{y + 1};1H");
                 ConsoleColor curFg = ConsoleColor.Gray, curBg = ConsoleColor.Black;
-                for (int x = 0; x < _width; x++)
+                for (int x = 0; x < w; x++)
                 {
                     if (fg[y, x] != curFg || bg[y, x] != curBg)
                     {
@@ -93,10 +218,9 @@ public class Renderer
         }
         else
         {
-            // Differential update
-            for (int y = 0; y < usableHeight; y++)
+            for (int y = 0; y < h; y++)
             {
-                for (int x = 0; x < _width; x++)
+                for (int x = 0; x < w; x++)
                 {
                     if (chars[y, x] != _prevChars![y, x] || fg[y, x] != _prevFg![y, x] || bg[y, x] != _prevBg![y, x])
                     {
@@ -108,26 +232,20 @@ public class Renderer
             }
         }
 
-        // Render status bar on the last row
-        sb.Append($"\x1b[{_height};1H");
-        sb.Append(StatusBar.Render(session, _width, commandInput));
+        // Position cursor
+        sb.Append($"\x1b[{cursorRow + 1};{cursorCol + 1}H");
 
-        // Position cursor at the active pane's cursor position
-        int cursorScreenRow = activePane.Top + activePane.Screen.CursorRow + 1;
-        int cursorScreenCol = activePane.Left + activePane.Screen.CursorCol + 1;
-
-        sb.Append($"\x1b[{cursorScreenRow};{cursorScreenCol}H");
-
-        // Show cursor
-        if (activePane.Screen.CursorVisible)
+        // Show/hide cursor
+        if (cursorVisible)
             sb.Append("\x1b[?25h");
+
+        sb.Append("\x1b[0m");
 
         // Save current buffer for next diff
         _prevChars = chars;
         _prevFg = fg;
         _prevBg = bg;
 
-        // Flush all at once
         Console.Write(sb.ToString());
     }
 
@@ -139,7 +257,7 @@ public class Renderer
             for (int y = 0; y < Math.Min(destHeight, screen.Height); y++)
             {
                 int screenY = destTop + y;
-                if (screenY >= _height - 1) break; // Don't overwrite status bar
+                if (screenY >= _height - 1) break;
 
                 for (int x = 0; x < Math.Min(destWidth, screen.Width); x++)
                 {

@@ -56,6 +56,10 @@ public class Pane : IDisposable
     private void ReadLoop()
     {
         var buffer = new byte[4096];
+        var charBuf = new char[4096];
+        // Use a Decoder to correctly handle multi-byte UTF-8 sequences
+        // that may be split across read boundaries.
+        var decoder = System.Text.Encoding.UTF8.GetDecoder();
         try
         {
             while (_running && !Process.HasExited)
@@ -63,12 +67,15 @@ public class Pane : IDisposable
                 int bytesRead = Process.OutputStream.Read(buffer, 0, buffer.Length);
                 if (bytesRead <= 0) break;
 
-                var text = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                lock (_lock)
+                int charCount = decoder.GetChars(buffer, 0, bytesRead, charBuf, 0);
+                if (charCount > 0)
                 {
-                    Parser.Process(Screen, text.AsSpan());
+                    lock (_lock)
+                    {
+                        Parser.Process(Screen, charBuf.AsSpan(0, charCount));
+                    }
+                    OutputReceived?.Invoke(this);
                 }
-                OutputReceived?.Invoke(this);
             }
         }
         catch (IOException) { }

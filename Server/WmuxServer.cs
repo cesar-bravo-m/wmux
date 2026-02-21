@@ -1,4 +1,5 @@
-using System.IO.Pipes;
+using System.Net;
+using System.Net.Sockets;
 using Wmux.Commands;
 using Wmux.Core;
 
@@ -6,15 +7,20 @@ namespace Wmux.Server;
 
 /// <summary>
 /// Background server process that manages sessions and handles client connections
-/// via named pipes. Broadcasts screen snapshots to all attached clients.
+/// via TCP sockets on localhost. Broadcasts screen snapshots to all attached clients.
 /// </summary>
 public class WmuxServer
 {
-    public const string PipeName = "wmux-server";
+    public const int DefaultPort = 7482; // "wmux" on a phone keypad
+
+    private static readonly string _diagLog = Path.Combine(Path.GetTempPath(), "wmux-diag.log");
+    private static void Diag(string msg)
+    {
+        try { File.AppendAllText(_diagLog, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { }
+    }
 
     /// <summary>
-    /// Lock file path used for server discovery. Contains the server PID.
-    /// Avoids the race condition of probing the pipe (which consumes a connection).
+    /// Lock file path used for server discovery. Contains "PID:PORT".
     /// </summary>
     public static readonly string LockFilePath =
         Path.Combine(Path.GetTempPath(), "wmux-server.lock");
@@ -36,6 +42,11 @@ public class WmuxServer
     public bool EmbeddedMode { get; set; }
 
     /// <summary>
+    /// The actual TCP port the server is listening on.
+    /// </summary>
+    public int Port { get; private set; }
+
+    /// <summary>
     /// Signaled when the server is ready to accept connections.
     /// Used by embedded mode to avoid racing between server start and client connect.
     /// </summary>
@@ -45,54 +56,52 @@ public class WmuxServer
     {
         System.Diagnostics.Debug.WriteLine($"wmux server started (PID {Environment.ProcessId})");
 
-        // Write lock file for server discovery
-        WriteLockFile();
+        var listener = new TcpListener(IPAddress.Loopback, DefaultPort);
+        try
+        {
+            listener.Start();
+        }
+        catch (SocketException)
+        {
+            // Port in use — try an ephemeral port
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+        }
+
+        Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        // Write lock file for server discovery (PID:PORT)
+        WriteLockFile(Port);
 
         // Start the broadcast loop
         _ = Task.Run(() => BroadcastLoop(_cts.Token));
 
+        // Signal that the server is ready to accept connections
+        Ready.Set();
+
         try
         {
-            // Pre-create the first pipe so it's listening before we signal Ready.
-            var pipeServer = new NamedPipeServerStream(
-                PipeName,
-                PipeDirection.InOut,
-                NamedPipeServerStream.MaxAllowedServerInstances,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
-
-            // Signal that the server is ready to accept connections
-            Ready.Set();
-
             while (!_cts.Token.IsCancellationRequested)
             {
                 try
                 {
-                    await pipeServer.WaitForConnectionAsync(_cts.Token);
-                    var client = new ClientConnection(pipeServer);
+                    var tcpClient = await listener.AcceptTcpClientAsync(_cts.Token);
+                    tcpClient.NoDelay = true;
+                    var client = new ClientConnection(tcpClient);
                     lock (_lock) { _clients.Add(client); }
                     _ = Task.Run(() => HandleClient(client));
-
-                    // Create the next pipe for the next connection
-                    pipeServer = new NamedPipeServerStream(
-                        PipeName,
-                        PipeDirection.InOut,
-                        NamedPipeServerStream.MaxAllowedServerInstances,
-                        PipeTransmissionMode.Byte,
-                        PipeOptions.Asynchronous);
                 }
                 catch (OperationCanceledException) { break; }
+                catch (ObjectDisposedException) { break; }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"Server error: {ex.Message}");
                 }
             }
-
-            // Dispose the pending pipe that was never connected
-            try { pipeServer.Dispose(); } catch { }
         }
         finally
         {
+            try { listener.Stop(); } catch { }
             RemoveLockFile();
         }
     }
@@ -103,6 +112,7 @@ public class WmuxServer
     /// </summary>
     private async Task BroadcastLoop(CancellationToken ct)
     {
+        Diag("SERVER BroadcastLoop started");
         while (!ct.IsCancellationRequested)
         {
             try
@@ -150,7 +160,7 @@ public class WmuxServer
 
                         lock (client.WriteLock)
                         {
-                            IpcProtocol.Send(client.Pipe, snapshot);
+                            IpcProtocol.Send(client.Stream, snapshot);
                         }
                     }
                     catch
@@ -164,19 +174,44 @@ public class WmuxServer
 
     private async Task HandleClient(ClientConnection client)
     {
+        Diag("SERVER HandleClient: new client connected");
         try
         {
             while (client.IsConnected && !_cts.Token.IsCancellationRequested)
             {
-                var msg = await IpcProtocol.ReceiveAsync(client.Pipe, _cts.Token);
-                if (msg == null) break;
+                Diag("SERVER HandleClient: waiting for message...");
+                var msg = await IpcProtocol.ReceiveAsync(client.Stream, _cts.Token);
+                if (msg == null)
+                {
+                    Diag("SERVER HandleClient: ReceiveAsync returned null");
+                    break;
+                }
+                Diag($"SERVER HandleClient: received {msg.GetType().Name}");
 
-                ProcessMessage(client, msg);
+                try
+                {
+                    ProcessMessage(client, msg);
+                    Diag($"SERVER HandleClient: processed {msg.GetType().Name} OK");
+                }
+                catch (Exception ex)
+                {
+                    Diag($"SERVER HandleClient: ProcessMessage threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                    try
+                    {
+                        lock (client.WriteLock)
+                        {
+                            IpcProtocol.Send(client.Stream, new ErrorMessage { Text = $"Server error: {ex.Message}" });
+                        }
+                    }
+                    catch { }
+                    break;
+                }
             }
         }
-        catch (IOException) { }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
+        catch (IOException ex) { Diag($"SERVER HandleClient: IOException: {ex.Message}"); }
+        catch (OperationCanceledException) { Diag("SERVER HandleClient: OperationCanceledException"); }
+        catch (ObjectDisposedException) { Diag("SERVER HandleClient: ObjectDisposedException"); }
+        catch (Exception ex) { Diag($"SERVER HandleClient: UNEXPECTED {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
         finally
         {
             bool shouldShutdown = false;
@@ -252,6 +287,7 @@ public class WmuxServer
 
     private void HandleNewSession(ClientConnection client, NewSessionMessage msg)
     {
+        Diag($"SERVER HandleNewSession: name='{msg.Name}' size={msg.Width}x{msg.Height} force={msg.ForceCreate}");
         lock (_lock)
         {
             if (msg.ForceCreate)
@@ -266,7 +302,7 @@ public class WmuxServer
                     {
                         lock (client.WriteLock)
                         {
-                            IpcProtocol.Send(client.Pipe, new ErrorMessage
+                            IpcProtocol.Send(client.Stream, new ErrorMessage
                             {
                                 Text = $"duplicate session: {msg.Name}"
                             });
@@ -292,7 +328,7 @@ public class WmuxServer
 
                 lock (client.WriteLock)
                 {
-                    IpcProtocol.Send(client.Pipe, new AttachMessage { SessionName = name });
+                    IpcProtocol.Send(client.Stream, new AttachMessage { SessionName = name });
                 }
                 SendImmediateSnapshot(client, session);
             }
@@ -300,10 +336,12 @@ public class WmuxServer
             {
                 // CreateOrAttach: attach to existing session by name, or create new
                 var name = string.IsNullOrEmpty(msg.Name) ? GenerateSessionName() : msg.Name;
+                Diag($"SERVER HandleNewSession(CreateOrAttach): resolved name='{name}'");
 
                 var existing = _sessions.Values.FirstOrDefault(s => s.Name == name);
                 if (existing != null)
                 {
+                    Diag($"SERVER HandleNewSession: attaching to existing session '{name}'");
                     client.Session = existing;
                     client.Width = msg.Width;
                     client.Height = msg.Height;
@@ -312,13 +350,15 @@ public class WmuxServer
 
                     lock (client.WriteLock)
                     {
-                        IpcProtocol.Send(client.Pipe, new AttachMessage { SessionName = name });
+                        IpcProtocol.Send(client.Stream, new AttachMessage { SessionName = name });
                     }
                     SendImmediateSnapshot(client, existing);
                     return;
                 }
 
+                Diag($"SERVER HandleNewSession: creating new session '{name}' size={msg.Width}x{msg.Height - 1}");
                 var session = new Session(name, msg.Width, msg.Height - 1);
+                Diag($"SERVER HandleNewSession: session created OK, id={session.Id}");
                 _sessions[session.Id] = session;
                 _nextSessionId++;
                 client.Session = session;
@@ -328,17 +368,21 @@ public class WmuxServer
                 WireSessionPanes(session);
                 MarkDirty(session);
 
+                Diag("SERVER HandleNewSession: sending AttachMessage response");
                 lock (client.WriteLock)
                 {
-                    IpcProtocol.Send(client.Pipe, new AttachMessage { SessionName = name });
+                    IpcProtocol.Send(client.Stream, new AttachMessage { SessionName = name });
                 }
+                Diag("SERVER HandleNewSession: AttachMessage sent, now sending snapshot");
                 SendImmediateSnapshot(client, session);
+                Diag("SERVER HandleNewSession: complete");
             }
         }
     }
 
     private void HandleAttach(ClientConnection client, AttachMessage msg)
     {
+        Diag($"SERVER HandleAttach: sessionName='{msg.SessionName}'");
         lock (_lock)
         {
             Session? session = null;
@@ -360,7 +404,7 @@ public class WmuxServer
             {
                 lock (client.WriteLock)
                 {
-                    IpcProtocol.Send(client.Pipe, new ErrorMessage { Text = "No matching session found" });
+                    IpcProtocol.Send(client.Stream, new ErrorMessage { Text = "No matching session found" });
                 }
                 return;
             }
@@ -379,7 +423,7 @@ public class WmuxServer
 
             lock (client.WriteLock)
             {
-                IpcProtocol.Send(client.Pipe, new AttachMessage { SessionName = session.Name });
+                IpcProtocol.Send(client.Stream, new AttachMessage { SessionName = session.Name });
             }
             SendImmediateSnapshot(client, session);
         }
@@ -450,7 +494,7 @@ public class WmuxServer
             {
                 lock (client.WriteLock)
                 {
-                    IpcProtocol.Send(client.Pipe, new CommandResultMessage { Result = result });
+                    IpcProtocol.Send(client.Stream, new CommandResultMessage { Result = result });
                 }
             }
             catch { }
@@ -465,14 +509,25 @@ public class WmuxServer
     {
         try
         {
-            if (session.Windows.Count == 0) return;
+            if (session.Windows.Count == 0)
+            {
+                Diag("SERVER SendImmediateSnapshot: no windows, skipping");
+                return;
+            }
+            Diag($"SERVER SendImmediateSnapshot: building snapshot for {client.Width}x{client.Height}");
             var snapshot = ServerRenderer.BuildSnapshot(session, client.Width, client.Height);
+            Diag($"SERVER SendImmediateSnapshot: snapshot built, chars={snapshot.Chars.Length} fg={snapshot.Fg.Length} bg={snapshot.Bg.Length}");
             lock (client.WriteLock)
             {
-                IpcProtocol.Send(client.Pipe, snapshot);
+                Diag("SERVER SendImmediateSnapshot: sending...");
+                IpcProtocol.Send(client.Stream, snapshot);
+                Diag("SERVER SendImmediateSnapshot: sent OK");
             }
         }
-        catch { /* Client may have disconnected */ }
+        catch (Exception ex)
+        {
+            Diag($"SERVER SendImmediateSnapshot: EXCEPTION {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -570,7 +625,7 @@ public class WmuxServer
                 {
                     lock (client.WriteLock)
                     {
-                        IpcProtocol.Send(client.Pipe, new SessionClosedMessage());
+                        IpcProtocol.Send(client.Stream, new SessionClosedMessage());
                     }
                 }
                 catch { }
@@ -610,7 +665,7 @@ public class WmuxServer
 
             lock (client.WriteLock)
             {
-                IpcProtocol.Send(client.Pipe, list);
+                IpcProtocol.Send(client.Stream, list);
             }
         }
     }
@@ -634,7 +689,7 @@ public class WmuxServer
             {
                 lock (client.WriteLock)
                 {
-                    IpcProtocol.Send(client.Pipe, new SessionClosedMessage());
+                    IpcProtocol.Send(client.Stream, new SessionClosedMessage());
                 }
             }
             catch { }
@@ -653,57 +708,57 @@ public class WmuxServer
 
     /// <summary>
     /// Check whether a wmux server is running by reading the lock file
-    /// and verifying the PID is still alive. This avoids consuming a pipe
-    /// connection (which previously caused race conditions on attach).
+    /// and verifying the PID is still alive. Returns the port if running, -1 otherwise.
     /// </summary>
-    public static bool IsServerRunning()
+    public static int GetServerPort()
     {
         try
         {
             if (!File.Exists(LockFilePath))
-                return false;
+                return -1;
 
             var content = File.ReadAllText(LockFilePath).Trim();
-            if (!int.TryParse(content, out int pid))
-                return false;
+            var parts = content.Split(':');
+            if (parts.Length != 2 || !int.TryParse(parts[0], out int pid) || !int.TryParse(parts[1], out int port))
+            {
+                RemoveLockFile();
+                return -1;
+            }
 
-            // Check if the process is still alive AND is actually a wmux process
             try
             {
                 var process = System.Diagnostics.Process.GetProcessById(pid);
                 if (process.HasExited)
                 {
                     RemoveLockFile();
-                    return false;
+                    return -1;
                 }
 
-                // Verify process name to avoid PID reuse false positives
-                var name = process.ProcessName.ToLowerInvariant();
-                if (!name.Contains("wmux"))
-                {
-                    RemoveLockFile();
-                    return false;
-                }
-                return true;
+                return port;
             }
             catch (ArgumentException)
             {
                 // Process not found — stale lock file
                 RemoveLockFile();
-                return false;
+                return -1;
             }
         }
         catch
         {
-            return false;
+            return -1;
         }
     }
 
-    private static void WriteLockFile()
+    /// <summary>
+    /// Check whether a wmux server is running.
+    /// </summary>
+    public static bool IsServerRunning() => GetServerPort() > 0;
+
+    private static void WriteLockFile(int port)
     {
         try
         {
-            File.WriteAllText(LockFilePath, Environment.ProcessId.ToString());
+            File.WriteAllText(LockFilePath, $"{Environment.ProcessId}:{port}");
         }
         catch (Exception ex)
         {
@@ -724,22 +779,28 @@ public class WmuxServer
 
 public class ClientConnection : IDisposable
 {
-    public NamedPipeServerStream Pipe { get; }
+    private readonly TcpClient _tcpClient;
+    public NetworkStream Stream { get; }
     public Session? Session { get; set; }
     public int Width { get; set; }
     public int Height { get; set; }
-    public bool IsConnected => Pipe.IsConnected;
+    public bool IsConnected => _tcpClient.Connected;
 
     /// <summary>
-    /// Lock for serializing writes to this client's pipe.
+    /// Lock for serializing writes to this client's stream.
     /// Multiple threads (broadcast loop, command responses) may write concurrently.
     /// </summary>
     public readonly object WriteLock = new();
 
-    public ClientConnection(NamedPipeServerStream pipe)
+    public ClientConnection(TcpClient tcpClient)
     {
-        Pipe = pipe;
+        _tcpClient = tcpClient;
+        Stream = tcpClient.GetStream();
     }
 
-    public void Dispose() => Pipe.Dispose();
+    public void Dispose()
+    {
+        try { Stream.Dispose(); } catch { }
+        try { _tcpClient.Dispose(); } catch { }
+    }
 }
