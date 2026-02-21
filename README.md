@@ -2,15 +2,13 @@
 
 A terminal multiplexer for Windows, heavily inspired by tmux. Built on top of the Windows ConPTY API and .NET 10.
 
-## Quickstart
-
-Download the latest executable from the [releases page]() and add it to your PATH. Then run `wmux` in your terminal to start a new session.
-
-## Screenshots
+Useful for running many claude instances in a single powershell terminal side by side.
 
 <img width="1635" height="976" alt="image" src="https://github.com/user-attachments/assets/7680baa2-1b90-4ca5-afa6-e8429ae11704" />
 
-<img width="2628" height="1245" alt="image" src="https://github.com/user-attachments/assets/fae124b2-314a-4d17-8fe6-c3ef9690f36b" />
+## Quickstart
+
+Download the latest executable from the [releases page]() and add it to your PATH. Then run `wmux` in your terminal to start a new session.
 
 ## Features
 
@@ -35,6 +33,7 @@ Download the latest executable from the [releases page]() and add it to your PAT
 - Implement a command to detach a pane into a new window
 - Interactive session selector
 - Implement a command to freeze terminal output
+- Investigate compatibility with different powershell versions.
 - Read configuration from wmux.yml
 
 ## License
