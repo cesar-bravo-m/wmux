@@ -8,7 +8,7 @@ Useful for running many claude instances in a single powershell terminal side by
 
 ## Quickstart
 
-Download the latest executable from the [releases page]() and add it to your PATH. Then run `wmux` in your terminal to start a new session.
+Download the latest executable from the [releases page](https://github.com/cesar-bravo-m/wmux/releases) and add it to your PATH. Then run `wmux` in your terminal to start a new session.
 
 ## Features
 
