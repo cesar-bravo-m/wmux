@@ -1,5 +1,6 @@
 using Wmux.Config;
 using Wmux.Core;
+using Wmux.Terminal;
 using Wmux.UI;
 
 namespace Wmux.Client;
@@ -29,6 +30,9 @@ public class InputHandler
     private bool _renameMode;
     private string _renameBuffer = "";
     private string _lineBuffer = "";
+
+    // Selection mode routing flag (actual cursor/scroll state lives on Pane)
+    private bool _selectionMode;
 
     public event Action? RequestDetach;
     public event Action? RequestExit;
@@ -84,6 +88,9 @@ public class InputHandler
     /// </summary>
     public bool HasPendingPrefix => _state != PrefixState.Idle;
 
+    /// <summary>True when the pane is in selection (copy) mode.</summary>
+    public bool IsSelectionMode => _selectionMode;
+
     /// <summary>
     /// Flush the pending/active prefix state as if the user never intended
     /// to issue a command. Returns the literal characters to forward to the
@@ -121,6 +128,15 @@ public class InputHandler
         return flushed.Length > 0 ? flushed : null;
     }
 
+    /// <summary>
+    /// Enter selection mode. Called by WmuxClient in server mode after
+    /// receiving the selection-enter command acknowledgement.
+    /// </summary>
+    public void EnterSelectionMode()
+    {
+        _selectionMode = true;
+    }
+
     public InputHandler(KeyBindings keys)
     {
         _keys = keys;
@@ -138,6 +154,13 @@ public class InputHandler
         if (commandLine.IsActive)
         {
             command = commandLine.HandleKey(key);
+            return true;
+        }
+
+        // Selection mode — intercept all keys for navigation
+        if (_selectionMode)
+        {
+            HandleSelectionModeKeyLocal(key, session.ActiveWindow.ActivePane);
             return true;
         }
 
@@ -293,6 +316,12 @@ public class InputHandler
                 window.CycleLayout();
                 return true;
             }
+            if (ch == _keys.CopyMode)
+            {
+                window.ActivePane.EnterSelectionMode();
+                _selectionMode = true;
+                return true;
+            }
             return true; // Consume unknown prefix keys
         }
 
@@ -321,6 +350,13 @@ public class InputHandler
         if (commandLine.IsActive)
         {
             action = commandLine.HandleKey(key);
+            return true;
+        }
+
+        // Selection mode — intercept all keys, send commands to server
+        if (_selectionMode)
+        {
+            HandleSelectionModeKeyServer(key, out action);
             return true;
         }
 
@@ -411,6 +447,12 @@ public class InputHandler
             if (ch == _keys.KillWindow) { action = "kill-window"; return true; }
             if (ch == _keys.NextPane) { action = "next-pane"; return true; }
             if (ch == _keys.CycleLayout) { action = "select-layout cycle"; return true; }
+            if (ch == _keys.CopyMode)
+            {
+                action = "selection-enter";
+                _selectionMode = true;
+                return true;
+            }
             return true; // Consume unknown prefix keys
         }
 
@@ -421,6 +463,81 @@ public class InputHandler
             return true;
         }
         return false; // Forward to active pane
+    }
+
+    /// <summary>
+    /// Handle selection mode key in standalone mode — directly modifies pane state.
+    /// </summary>
+    private void HandleSelectionModeKeyLocal(ConsoleKeyInfo key, Pane pane)
+    {
+        if (key.Key == ConsoleKey.Escape || key.KeyChar == 'q')
+        {
+            _selectionMode = false;
+            pane.ExitSelectionMode();
+            return;
+        }
+
+        // SPACE toggles highlight start / copies selection
+        if (key.Key == ConsoleKey.Spacebar)
+        {
+            if (!pane.SelectionHighlightActive)
+            {
+                pane.StartSelectionHighlight();
+            }
+            else
+            {
+                string text = pane.ExtractSelectedText();
+                ClipboardHelper.SetText(text);
+                _selectionMode = false;
+                pane.ExitSelectionMode();
+                StatusMessage?.Invoke("selection copied to clipboard",
+                    ConsoleColor.Black, ConsoleColor.Green);
+            }
+            return;
+        }
+
+        if (key.Key == ConsoleKey.UpArrow || key.KeyChar == 'k') { pane.SelectionMoveUp(); return; }
+        if (key.Key == ConsoleKey.DownArrow || key.KeyChar == 'j') { pane.SelectionMoveDown(); return; }
+        if (key.Key == ConsoleKey.LeftArrow || key.KeyChar == 'h') { pane.SelectionMoveLeft(); return; }
+        if (key.Key == ConsoleKey.RightArrow || key.KeyChar == 'l') { pane.SelectionMoveRight(); return; }
+        // All other keys consumed silently
+    }
+
+    /// <summary>
+    /// Handle selection mode key in server mode — returns command strings.
+    /// </summary>
+    private void HandleSelectionModeKeyServer(ConsoleKeyInfo key, out string? action)
+    {
+        action = null;
+
+        if (key.Key == ConsoleKey.Escape || key.KeyChar == 'q')
+        {
+            _selectionMode = false;
+            action = "selection-exit";
+            return;
+        }
+
+        // SPACE toggles highlight start / copies selection (server decides which)
+        if (key.Key == ConsoleKey.Spacebar)
+        {
+            action = "selection-toggle";
+            return;
+        }
+
+        if (key.Key == ConsoleKey.UpArrow || key.KeyChar == 'k') { action = "selection-move -U"; return; }
+        if (key.Key == ConsoleKey.DownArrow || key.KeyChar == 'j') { action = "selection-move -D"; return; }
+        if (key.Key == ConsoleKey.LeftArrow || key.KeyChar == 'h') { action = "selection-move -L"; return; }
+        if (key.Key == ConsoleKey.RightArrow || key.KeyChar == 'l') { action = "selection-move -R"; return; }
+        // All other keys consumed silently
+    }
+
+    /// <summary>
+    /// Called externally (e.g. by client on receiving server copy acknowledgement)
+    /// to reset the local selection mode flag.
+    /// </summary>
+    public void ExitSelectionModeExternal()
+    {
+        _selectionMode = false;
     }
 
     /// <summary>

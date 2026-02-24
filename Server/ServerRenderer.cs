@@ -41,23 +41,85 @@ public static class ServerRenderer
         }
 
         // Render status bar on the last row
-        string statusStr = StatusBar.RenderPlain(session, width, commandInput);
+        string statusStr = activePane.IsInSelectionMode
+            ? StatusBar.RenderPlain(session, width, "selection mode")
+            : StatusBar.RenderPlain(session, width, commandInput);
+        var statusBarFg = activePane.IsInSelectionMode ? ConsoleColor.Black : ConsoleColor.Black;
+        var statusBarBg = activePane.IsInSelectionMode ? ConsoleColor.Yellow : ConsoleColor.Green;
         for (int x = 0; x < Math.Min(statusStr.Length, width); x++)
         {
             chars[height - 1, x] = statusStr[x];
-            fg[height - 1, x] = ConsoleColor.Black;
-            bg[height - 1, x] = ConsoleColor.Green;
+            fg[height - 1, x] = statusBarFg;
+            bg[height - 1, x] = statusBarBg;
         }
         for (int x = statusStr.Length; x < width; x++)
         {
             chars[height - 1, x] = ' ';
-            fg[height - 1, x] = ConsoleColor.Black;
-            bg[height - 1, x] = ConsoleColor.Green;
+            fg[height - 1, x] = statusBarFg;
+            bg[height - 1, x] = statusBarBg;
         }
 
         // Cursor position
-        int cursorRow = activePane.Top + activePane.Screen.CursorRow;
-        int cursorCol = activePane.Left + activePane.Screen.CursorCol;
+        int cursorRow, cursorCol;
+        bool cursorVisible;
+        if (activePane.IsInSelectionMode)
+        {
+            cursorRow = activePane.Top + activePane.SelectionCursorRow;
+            cursorCol = activePane.Left + activePane.SelectionCursorCol;
+            cursorVisible = true;
+
+            if (activePane.SelectionHighlightActive)
+            {
+                // Invert all cells in the selection range
+                int scrollbackCount = activePane.Scrollback.Count;
+                int scrollOffset = activePane.SelectionScrollOffset;
+                int anchorVR = activePane.SelectionAnchorVirtualRow;
+                int cursorVR = scrollbackCount - scrollOffset + activePane.SelectionCursorRow;
+                int anchorCol = activePane.SelectionAnchorCol;
+                int curCursorCol = activePane.SelectionCursorCol;
+
+                int startVR, startCol, endVR, endCol;
+                if (anchorVR < cursorVR || (anchorVR == cursorVR && anchorCol <= curCursorCol))
+                { startVR = anchorVR; startCol = anchorCol; endVR = cursorVR; endCol = curCursorCol; }
+                else
+                { startVR = cursorVR; startCol = curCursorCol; endVR = anchorVR; endCol = anchorCol; }
+
+                for (int y = 0; y < activePane.Height; y++)
+                {
+                    int displayVR = scrollbackCount - scrollOffset + y;
+                    if (displayVR < startVR || displayVR > endVR) continue;
+
+                    int colStart = (displayVR == startVR) ? startCol : 0;
+                    int colEnd = (displayVR == endVR) ? endCol : activePane.Width - 1;
+
+                    for (int x = colStart; x <= colEnd && x < activePane.Width; x++)
+                    {
+                        int screenY = activePane.Top + y;
+                        int screenX = activePane.Left + x;
+                        if (screenY >= 0 && screenY < height - 1 && screenX >= 0 && screenX < width)
+                        {
+                            (fg[screenY, screenX], bg[screenY, screenX]) =
+                                (bg[screenY, screenX], fg[screenY, screenX]);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // No highlight — just invert the single cursor cell
+                if (cursorRow >= 0 && cursorRow < height - 1 && cursorCol >= 0 && cursorCol < width)
+                {
+                    (fg[cursorRow, cursorCol], bg[cursorRow, cursorCol]) =
+                        (bg[cursorRow, cursorCol], fg[cursorRow, cursorCol]);
+                }
+            }
+        }
+        else
+        {
+            cursorRow = activePane.Top + activePane.Screen.CursorRow;
+            cursorCol = activePane.Left + activePane.Screen.CursorCol;
+            cursorVisible = activePane.Screen.CursorVisible;
+        }
 
         // Pack into message
         return new ScreenSnapshotMessage
@@ -69,7 +131,7 @@ public static class ServerRenderer
             Bg = FlattenColors(bg, height, width),
             CursorRow = cursorRow,
             CursorCol = cursorCol,
-            CursorVisible = activePane.Screen.CursorVisible,
+            CursorVisible = cursorVisible,
         };
     }
 
@@ -79,19 +141,67 @@ public static class ServerRenderer
     {
         pane.Lock(screen =>
         {
+            int scrollOffset = pane.IsInSelectionMode ? pane.SelectionScrollOffset : 0;
+            int scrollbackCount = pane.Scrollback.Count;
+
             for (int y = 0; y < Math.Min(destHeight, screen.Height); y++)
             {
                 int screenY = destTop + y;
                 if (screenY >= totalHeight - 1) break; // don't overwrite status bar
 
-                for (int x = 0; x < Math.Min(destWidth, screen.Width); x++)
+                if (scrollOffset > 0)
                 {
-                    int screenX = destLeft + x;
-                    if (screenX >= chars.GetLength(1)) break;
+                    int virtualLine = scrollbackCount - scrollOffset + y;
+                    for (int x = 0; x < Math.Min(destWidth, screen.Width); x++)
+                    {
+                        int screenX = destLeft + x;
+                        if (screenX >= chars.GetLength(1)) break;
 
-                    chars[screenY, screenX] = screen.Chars[y][x];
-                    fg[screenY, screenX] = screen.FgColors[y][x];
-                    bg[screenY, screenX] = screen.BgColors[y][x];
+                        if (virtualLine < 0)
+                        {
+                            chars[screenY, screenX] = ' ';
+                            fg[screenY, screenX] = ConsoleColor.Gray;
+                            bg[screenY, screenX] = ConsoleColor.Black;
+                        }
+                        else if (virtualLine < scrollbackCount)
+                        {
+                            var line = pane.Scrollback.GetLine(virtualLine);
+                            if (line.HasValue && x < line.Value.Chars.Length)
+                            {
+                                chars[screenY, screenX] = line.Value.Chars[x];
+                                fg[screenY, screenX] = line.Value.Fg[x];
+                                bg[screenY, screenX] = line.Value.Bg[x];
+                            }
+                            else
+                            {
+                                chars[screenY, screenX] = ' ';
+                                fg[screenY, screenX] = ConsoleColor.Gray;
+                                bg[screenY, screenX] = ConsoleColor.Black;
+                            }
+                        }
+                        else
+                        {
+                            int srcRow = virtualLine - scrollbackCount;
+                            if (srcRow < screen.Height)
+                            {
+                                chars[screenY, screenX] = screen.Chars[srcRow][x];
+                                fg[screenY, screenX] = screen.FgColors[srcRow][x];
+                                bg[screenY, screenX] = screen.BgColors[srcRow][x];
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    for (int x = 0; x < Math.Min(destWidth, screen.Width); x++)
+                    {
+                        int screenX = destLeft + x;
+                        if (screenX >= chars.GetLength(1)) break;
+
+                        chars[screenY, screenX] = screen.Chars[y][x];
+                        fg[screenY, screenX] = screen.FgColors[y][x];
+                        bg[screenY, screenX] = screen.BgColors[y][x];
+                    }
                 }
             }
         });

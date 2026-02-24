@@ -50,9 +50,9 @@ public class ScrollbackBufferTests
         buf.Add("beta");
         buf.Add("gamma");
 
-        Assert.That(buf.GetLine(0), Is.EqualTo("alpha"));
-        Assert.That(buf.GetLine(1), Is.EqualTo("beta"));
-        Assert.That(buf.GetLine(2), Is.EqualTo("gamma"));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo("alpha"));
+        Assert.That(new string(buf.GetLine(1)!.Value.Chars), Is.EqualTo("beta"));
+        Assert.That(new string(buf.GetLine(2)!.Value.Chars), Is.EqualTo("gamma"));
     }
 
     [Test]
@@ -85,9 +85,9 @@ public class ScrollbackBufferTests
         buf.Add("D"); // Should overwrite "A"
 
         Assert.That(buf.Count, Is.EqualTo(3));
-        Assert.That(buf.GetLine(0), Is.EqualTo("B"));
-        Assert.That(buf.GetLine(1), Is.EqualTo("C"));
-        Assert.That(buf.GetLine(2), Is.EqualTo("D"));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo("B"));
+        Assert.That(new string(buf.GetLine(1)!.Value.Chars), Is.EqualTo("C"));
+        Assert.That(new string(buf.GetLine(2)!.Value.Chars), Is.EqualTo("D"));
     }
 
     [Test]
@@ -98,9 +98,9 @@ public class ScrollbackBufferTests
             buf.Add($"line-{i}");
 
         Assert.That(buf.Count, Is.EqualTo(3));
-        Assert.That(buf.GetLine(0), Is.EqualTo("line-7"));
-        Assert.That(buf.GetLine(1), Is.EqualTo("line-8"));
-        Assert.That(buf.GetLine(2), Is.EqualTo("line-9"));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo("line-7"));
+        Assert.That(new string(buf.GetLine(1)!.Value.Chars), Is.EqualTo("line-8"));
+        Assert.That(new string(buf.GetLine(2)!.Value.Chars), Is.EqualTo("line-9"));
     }
 
     [Test]
@@ -146,7 +146,7 @@ public class ScrollbackBufferTests
         buf.Add("new");
 
         Assert.That(buf.Count, Is.EqualTo(1));
-        Assert.That(buf.GetLine(0), Is.EqualTo("new"));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo("new"));
     }
 
     // ── Edge cases ───────────────────────────────────────────────────
@@ -159,7 +159,7 @@ public class ScrollbackBufferTests
         buf.Add("second");
 
         Assert.That(buf.Count, Is.EqualTo(1));
-        Assert.That(buf.GetLine(0), Is.EqualTo("second"));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo("second"));
     }
 
     [Test]
@@ -168,6 +168,24 @@ public class ScrollbackBufferTests
         var buf = new ScrollbackBuffer(10);
         buf.Add("");
         Assert.That(buf.Count, Is.EqualTo(1));
-        Assert.That(buf.GetLine(0), Is.EqualTo(""));
+        Assert.That(new string(buf.GetLine(0)!.Value.Chars), Is.EqualTo(""));
+    }
+
+    // ── Rich line data ──────────────────────────────────────────────
+
+    [Test]
+    public void Add_RichLine_PreservesColors()
+    {
+        var buf = new ScrollbackBuffer(10);
+        var line = new ScrollbackLine(
+            new[] { 'H', 'i' },
+            new[] { ConsoleColor.Red, ConsoleColor.Green },
+            new[] { ConsoleColor.Black, ConsoleColor.Blue });
+        buf.Add(line);
+
+        var got = buf.GetLine(0)!.Value;
+        Assert.That(got.Chars, Is.EqualTo(new[] { 'H', 'i' }));
+        Assert.That(got.Fg, Is.EqualTo(new[] { ConsoleColor.Red, ConsoleColor.Green }));
+        Assert.That(got.Bg, Is.EqualTo(new[] { ConsoleColor.Black, ConsoleColor.Blue }));
     }
 }

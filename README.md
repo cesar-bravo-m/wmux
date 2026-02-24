@@ -21,7 +21,9 @@ Download the latest executable from the [releases page](https://github.com/cesar
 |----------|--------|
 | `za s` | Split horizontally |
 | `za v` | Split vertically |
+| `za [` | Enter select mode |
 | `za [hjkl]` | Navigate panes |
+| `za [ArrowKeys]` | Navigate panes |
 | `za c` | New window |
 | `za n/p` | Next/previous window |
 | `za d` | Detach terminal from wmux session |
@@ -32,7 +34,6 @@ Download the latest executable from the [releases page](https://github.com/cesar
 
 - Implement a command to detach a pane into a new window
 - Interactive session selector
-- Implement a command to freeze terminal output
 - Investigate compatibility with different powershell versions.
 - Read configuration from wmux.yml
 

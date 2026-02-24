@@ -1,3 +1,5 @@
+using Wmux.Core;
+
 namespace Wmux.Terminal;
 
 /// <summary>
@@ -16,6 +18,11 @@ public class ScreenBuffer
     public int CursorCol;
     public bool CursorVisible = true;
     public string Title = "";
+
+    /// <summary>
+    /// When set, lines scrolled off the top of the screen are saved here.
+    /// </summary>
+    public ScrollbackBuffer? Scrollback { get; set; }
 
     // Saved cursor state (for ESC 7 / ESC 8)
     private int _savedCursorRow;
@@ -300,6 +307,16 @@ public class ScreenBuffer
     {
         for (int i = 0; i < count; i++)
         {
+            // Save the line being scrolled off to scrollback (only when
+            // scrolling the entire screen, not a sub-region).
+            if (Scrollback != null && _scrollTop == 0)
+            {
+                Scrollback.Add(new ScrollbackLine(
+                    (char[])Chars[0].Clone(),
+                    (ConsoleColor[])FgColors[0].Clone(),
+                    (ConsoleColor[])BgColors[0].Clone()));
+            }
+
             for (int r = _scrollTop; r < _scrollBottom; r++)
             {
                 Chars[r] = Chars[r + 1];

@@ -26,6 +26,10 @@ public class CommandRegistry
             "next-window" or "nextw" => NextWindow(session),
             "prev-window" or "prevw" => PrevWindow(session),
             "next-pane" or "nextp" => NextPane(session),
+            "selection-enter" => SelectionEnter(session),
+            "selection-exit" => SelectionExit(session),
+            "selection-move" => SelectionMove(cmd, session),
+            "selection-toggle" => SelectionToggle(session),
             _ => $"Unknown command: {cmd.Name}"
         };
     }
@@ -199,5 +203,52 @@ public class CommandRegistry
             }
         }
         return null;
+    }
+
+    private string? SelectionEnter(Session session)
+    {
+        session.ActiveWindow.ActivePane.EnterSelectionMode();
+        return null;
+    }
+
+    private string? SelectionExit(Session session)
+    {
+        session.ActiveWindow.ActivePane.ExitSelectionMode();
+        return null;
+    }
+
+    private string? SelectionMove(ParsedCommand cmd, Session session)
+    {
+        var pane = session.ActiveWindow.ActivePane;
+        foreach (var arg in cmd.Args)
+        {
+            switch (arg)
+            {
+                case "-U": pane.SelectionMoveUp(); break;
+                case "-D": pane.SelectionMoveDown(); break;
+                case "-L": pane.SelectionMoveLeft(); break;
+                case "-R": pane.SelectionMoveRight(); break;
+            }
+        }
+        return null;
+    }
+
+    private string? SelectionToggle(Session session)
+    {
+        var pane = session.ActiveWindow.ActivePane;
+        if (!pane.IsInSelectionMode) return null;
+
+        if (!pane.SelectionHighlightActive)
+        {
+            pane.StartSelectionHighlight();
+            return null;
+        }
+        else
+        {
+            string text = pane.ExtractSelectedText();
+            Terminal.ClipboardHelper.SetText(text);
+            pane.ExitSelectionMode();
+            return "selection copied to clipboard";
+        }
     }
 }

@@ -231,6 +231,10 @@ public class WmuxClient
                     case CommandResultMessage cr:
                         if (cr.Result != null)
                         {
+                            // If selection was copied, exit selection mode on the client
+                            if (cr.Result == "selection copied to clipboard")
+                                _inputHandler?.ExitSelectionModeExternal();
+
                             _statusMessage = cr.Result;
                             _statusExpiry = DateTime.Now.AddSeconds(2);
                             if (cr.Result is "No next window" or "No previous window")
@@ -518,7 +522,7 @@ public class WmuxClient
         Diag("CLIENT RenderLoop started");
         while (_running)
         {
-            if (_needsRender && _renderer != null)
+            if ((_needsRender || _statusMessage != null) && _renderer != null)
             {
                 _needsRender = false;
                 _renderCount++;
@@ -559,6 +563,12 @@ public class WmuxClient
             sFg = ConsoleColor.Black;
             sBg = ConsoleColor.Yellow;
         }
+        else if (_inputHandler != null && _inputHandler.IsSelectionMode)
+        {
+            cmdInput = "selection mode";
+            sFg = ConsoleColor.Black;
+            sBg = ConsoleColor.Yellow;
+        }
         else if (_inputHandler != null && (_inputHandler.IsPrefixActive || _inputHandler.IsPrefixPending))
         {
             cmdInput = _inputHandler.PrefixProgress;
@@ -596,7 +606,13 @@ public class WmuxClient
         var sFg = ConsoleColor.Black;
         var sBg = ConsoleColor.Green;
 
-        if (!cmdMode && _inputHandler != null && (_inputHandler.IsPrefixActive || _inputHandler.IsPrefixPending))
+        if (!cmdMode && _inputHandler != null && _inputHandler.IsSelectionMode)
+        {
+            statusOverlay = "selection mode";
+            sFg = ConsoleColor.Black;
+            sBg = ConsoleColor.Yellow;
+        }
+        else if (!cmdMode && _inputHandler != null && (_inputHandler.IsPrefixActive || _inputHandler.IsPrefixPending))
         {
             statusOverlay = _inputHandler.PrefixProgress;
             sFg = ConsoleColor.White;
