@@ -30,12 +30,39 @@ public class Window : IDisposable
         ActivePane = firstPane;
     }
 
+    public Window(string name, int width, int height, Pane existingPane)
+    {
+        Id = Interlocked.Increment(ref _nextId);
+        Name = name;
+        Width = width;
+        Height = height;
+
+        existingPane.Resize(0, 0, width, height);
+        Layout = new PaneLayout(existingPane);
+        ActivePane = existingPane;
+    }
+
     public List<Pane> GetPanes() => Layout.GetAllPanes();
 
     public Pane? SplitPane(SplitDirection direction)
     {
         var newPane = Layout.Split(ActivePane, direction, Width, Height);
         return newPane;
+    }
+
+    public bool DetachPane(Pane pane)
+    {
+        var panes = GetPanes();
+        if (panes.Count <= 1) return false;
+
+        if (Layout.Remove(pane))
+        {
+            Layout.Recalculate(0, 0, Width, Height);
+            if (ActivePane == pane)
+                ActivePane = GetPanes().First();
+            return true;
+        }
+        return false;
     }
 
     public void ClosePane(Pane pane)

@@ -26,4 +26,5 @@ public class KeyBindings
     public char KillWindow { get; set; } = '&';
     public char NextPane { get; set; } = 'o';
     public char CycleLayout { get; set; } = ' ';
+    public char BreakPane { get; set; } = '!';
 }

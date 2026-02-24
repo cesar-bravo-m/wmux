@@ -322,6 +322,12 @@ public class InputHandler
                 _selectionMode = true;
                 return true;
             }
+            if (ch == _keys.BreakPane)
+            {
+                if (!session.BreakPane())
+                    StatusMessage?.Invoke("Cannot break: only one pane", ConsoleColor.Black, ConsoleColor.Yellow);
+                return true;
+            }
             return true; // Consume unknown prefix keys
         }
 
@@ -453,6 +459,7 @@ public class InputHandler
                 _selectionMode = true;
                 return true;
             }
+            if (ch == _keys.BreakPane) { action = "break-pane"; return true; }
             return true; // Consume unknown prefix keys
         }
 

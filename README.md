@@ -21,6 +21,7 @@ Download the latest executable from the [releases page](https://github.com/cesar
 |----------|--------|
 | `za s` | Split horizontally |
 | `za v` | Split vertically |
+| `za !` | Send current pane to new window |
 | `za [` | Enter select mode |
 | `za [hjkl]` | Navigate panes |
 | `za [ArrowKeys]` | Navigate panes |
@@ -32,7 +33,6 @@ Download the latest executable from the [releases page](https://github.com/cesar
 
 ## Todo
 
-- Implement a command to detach a pane into a new window
 - Interactive session selector
 - Investigate compatibility with different powershell versions.
 - Read configuration from wmux.yml

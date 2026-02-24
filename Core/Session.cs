@@ -60,6 +60,21 @@ public class Session : IDisposable
             ActiveWindow = Windows[index];
     }
 
+    public bool BreakPane()
+    {
+        var window = ActiveWindow;
+        if (window.GetPanes().Count <= 1) return false;
+
+        var pane = window.ActivePane;
+        window.DetachPane(pane);
+
+        var newWindow = new Window(Windows.Count.ToString(), window.Width, window.Height, pane);
+        int idx = Windows.IndexOf(window);
+        Windows.Insert(idx + 1, newWindow);
+        ActiveWindow = newWindow;
+        return true;
+    }
+
     public void Resize(int width, int height)
     {
         foreach (var win in Windows)

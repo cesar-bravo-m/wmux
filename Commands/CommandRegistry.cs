@@ -25,6 +25,7 @@ public class CommandRegistry
             "swap-pane" => SwapPane(cmd, session),
             "next-window" or "nextw" => NextWindow(session),
             "prev-window" or "prevw" => PrevWindow(session),
+            "break-pane" or "breakp" => BreakPane(session),
             "next-pane" or "nextp" => NextPane(session),
             "selection-enter" => SelectionEnter(session),
             "selection-exit" => SelectionExit(session),
@@ -141,6 +142,13 @@ public class CommandRegistry
         var lines = panes.Select((p, i) =>
             $"{i}: [{p.Width}x{p.Height}] at ({p.Left},{p.Top}){(p == session.ActiveWindow.ActivePane ? " (active)" : "")}");
         return string.Join("\n", lines);
+    }
+
+    private string? BreakPane(Session session)
+    {
+        if (!session.BreakPane())
+            return "Cannot break: only one pane";
+        return null;
     }
 
     private string? NextWindow(Session session)
