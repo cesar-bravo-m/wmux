@@ -13,12 +13,6 @@ public class WmuxServer
 {
     public const int DefaultPort = 7482; // "wmux" on a phone keypad
 
-    private static readonly string _diagLog = Path.Combine(Path.GetTempPath(), "wmux-diag.log");
-    private static void Diag(string msg)
-    {
-        try { File.AppendAllText(_diagLog, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { }
-    }
-
     /// <summary>
     /// Lock file path used for server discovery. Contains "PID:PORT".
     /// </summary>
@@ -112,7 +106,6 @@ public class WmuxServer
     /// </summary>
     private async Task BroadcastLoop(CancellationToken ct)
     {
-        Diag("SERVER BroadcastLoop started");
         while (!ct.IsCancellationRequested)
         {
             try
@@ -174,28 +167,20 @@ public class WmuxServer
 
     private async Task HandleClient(ClientConnection client)
     {
-        Diag("SERVER HandleClient: new client connected");
         try
         {
             while (client.IsConnected && !_cts.Token.IsCancellationRequested)
             {
-                Diag("SERVER HandleClient: waiting for message...");
                 var msg = await IpcProtocol.ReceiveAsync(client.Stream, _cts.Token);
                 if (msg == null)
-                {
-                    Diag("SERVER HandleClient: ReceiveAsync returned null");
                     break;
-                }
-                Diag($"SERVER HandleClient: received {msg.GetType().Name}");
 
                 try
                 {
                     ProcessMessage(client, msg);
-                    Diag($"SERVER HandleClient: processed {msg.GetType().Name} OK");
                 }
                 catch (Exception ex)
                 {
-                    Diag($"SERVER HandleClient: ProcessMessage threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
                     try
                     {
                         lock (client.WriteLock)
@@ -208,10 +193,10 @@ public class WmuxServer
                 }
             }
         }
-        catch (IOException ex) { Diag($"SERVER HandleClient: IOException: {ex.Message}"); }
-        catch (OperationCanceledException) { Diag("SERVER HandleClient: OperationCanceledException"); }
-        catch (ObjectDisposedException) { Diag("SERVER HandleClient: ObjectDisposedException"); }
-        catch (Exception ex) { Diag($"SERVER HandleClient: UNEXPECTED {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
+        catch (IOException) { }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch { }
         finally
         {
             bool shouldShutdown = false;
@@ -287,7 +272,6 @@ public class WmuxServer
 
     private void HandleNewSession(ClientConnection client, NewSessionMessage msg)
     {
-        Diag($"SERVER HandleNewSession: name='{msg.Name}' size={msg.Width}x{msg.Height} force={msg.ForceCreate}");
         lock (_lock)
         {
             if (msg.ForceCreate)
@@ -336,12 +320,10 @@ public class WmuxServer
             {
                 // CreateOrAttach: attach to existing session by name, or create new
                 var name = string.IsNullOrEmpty(msg.Name) ? GenerateSessionName() : msg.Name;
-                Diag($"SERVER HandleNewSession(CreateOrAttach): resolved name='{name}'");
 
                 var existing = _sessions.Values.FirstOrDefault(s => s.Name == name);
                 if (existing != null)
                 {
-                    Diag($"SERVER HandleNewSession: attaching to existing session '{name}'");
                     client.Session = existing;
                     client.Width = msg.Width;
                     client.Height = msg.Height;
@@ -356,9 +338,7 @@ public class WmuxServer
                     return;
                 }
 
-                Diag($"SERVER HandleNewSession: creating new session '{name}' size={msg.Width}x{msg.Height - 1}");
                 var session = new Session(name, msg.Width, msg.Height - 1);
-                Diag($"SERVER HandleNewSession: session created OK, id={session.Id}");
                 _sessions[session.Id] = session;
                 _nextSessionId++;
                 client.Session = session;
@@ -368,21 +348,17 @@ public class WmuxServer
                 WireSessionPanes(session);
                 MarkDirty(session);
 
-                Diag("SERVER HandleNewSession: sending AttachMessage response");
                 lock (client.WriteLock)
                 {
                     IpcProtocol.Send(client.Stream, new AttachMessage { SessionName = name });
                 }
-                Diag("SERVER HandleNewSession: AttachMessage sent, now sending snapshot");
                 SendImmediateSnapshot(client, session);
-                Diag("SERVER HandleNewSession: complete");
             }
         }
     }
 
     private void HandleAttach(ClientConnection client, AttachMessage msg)
     {
-        Diag($"SERVER HandleAttach: sessionName='{msg.SessionName}'");
         lock (_lock)
         {
             Session? session = null;
@@ -509,25 +485,14 @@ public class WmuxServer
     {
         try
         {
-            if (session.Windows.Count == 0)
-            {
-                Diag("SERVER SendImmediateSnapshot: no windows, skipping");
-                return;
-            }
-            Diag($"SERVER SendImmediateSnapshot: building snapshot for {client.Width}x{client.Height}");
+            if (session.Windows.Count == 0) return;
             var snapshot = ServerRenderer.BuildSnapshot(session, client.Width, client.Height);
-            Diag($"SERVER SendImmediateSnapshot: snapshot built, chars={snapshot.Chars.Length} fg={snapshot.Fg.Length} bg={snapshot.Bg.Length}");
             lock (client.WriteLock)
             {
-                Diag("SERVER SendImmediateSnapshot: sending...");
                 IpcProtocol.Send(client.Stream, snapshot);
-                Diag("SERVER SendImmediateSnapshot: sent OK");
             }
         }
-        catch (Exception ex)
-        {
-            Diag($"SERVER SendImmediateSnapshot: EXCEPTION {ex.GetType().Name}: {ex.Message}");
-        }
+        catch { }
     }
 
     /// <summary>

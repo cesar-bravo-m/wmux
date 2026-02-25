@@ -95,15 +95,8 @@ public class WmuxClient
     /// In this mode the client owns NO Session — it receives pre-composed
     /// screen grids from the server and sends input/commands back.
     /// </summary>
-    private static readonly string _diagLog = Path.Combine(Path.GetTempPath(), "wmux-diag.log");
-    private static void Diag(string msg)
-    {
-        try { File.AppendAllText(_diagLog, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { }
-    }
-
     public void AttachToServer(string? sessionName = null, ClientMode mode = ClientMode.CreateOrAttach, int port = 0)
     {
-        File.WriteAllText(_diagLog, $"[{DateTime.Now:HH:mm:ss.fff}] CLIENT AttachToServer mode={mode}\n");
         _serverMode = true;
 
         if (port <= 0)
@@ -116,17 +109,14 @@ public class WmuxClient
             _tcpClient.NoDelay = true;
             _stream = _tcpClient.GetStream();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Diag($"CLIENT Connect FAILED: {ex.Message}");
             Console.Error.WriteLine("Error: cannot connect to wmux server. Start one with 'wmux start-server'.");
             return;
         }
-        Diag($"CLIENT Connected OK to port {port}");
 
         int width = Console.WindowWidth;
         int height = Console.WindowHeight;
-        Diag($"CLIENT Terminal size: {width}x{height}");
         _renderer = new Renderer(width, height);
         _inputHandler = new InputHandler(_keys);
 
@@ -140,7 +130,6 @@ public class WmuxClient
         // No local Session — the server owns all state.
         _session = null;
 
-        Diag($"CLIENT Sending initial message for mode={mode}");
         switch (mode)
         {
             case ClientMode.ForceCreate:
@@ -169,14 +158,12 @@ public class WmuxClient
                 });
                 break;
         }
-        Diag($"CLIENT Initial message sent OK");
         // Set _running before starting the receive thread — otherwise
         // the thread sees _running == false and exits immediately.
         _running = true;
 
         var receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = "ServerReceive" };
         receiveThread.Start();
-        Diag($"CLIENT ReceiveLoop thread started, entering RunLoop");
 
         RunLoop();
     }
@@ -205,26 +192,17 @@ public class WmuxClient
     /// </summary>
     private void ReceiveLoop()
     {
-        Diag($"CLIENT ReceiveLoop started. _running={_running}");
-        int msgCount = 0;
         while (_running && _stream != null)
         {
             try
             {
-                Diag($"CLIENT ReceiveLoop waiting for message #{msgCount + 1}...");
                 var msg = IpcProtocol.Receive(_stream);
                 if (msg == null)
-                {
-                    Diag("CLIENT ReceiveLoop: Receive returned null (connection closed)");
                     break;
-                }
-                msgCount++;
-                Diag($"CLIENT ReceiveLoop: got message #{msgCount} type={msg.GetType().Name}");
 
                 switch (msg)
                 {
                     case ScreenSnapshotMessage snapshot:
-                        Diag($"CLIENT ReceiveLoop: snapshot {snapshot.Width}x{snapshot.Height} chars={snapshot.Chars.Length}");
                         _lastSnapshot = snapshot;
                         _needsRender = true;
                         break;
@@ -251,7 +229,6 @@ public class WmuxClient
                         }
                         break;
                     case ErrorMessage err:
-                        Diag($"CLIENT ReceiveLoop: ErrorMessage: {err.Text}");
                         // If we've never received a snapshot, this is a fatal
                         // error (e.g. "No matching session found"). Exit cleanly.
                         if (_lastSnapshot == null)
@@ -266,29 +243,15 @@ public class WmuxClient
                         _needsRender = true;
                         break;
                     case SessionClosedMessage:
-                        Diag("CLIENT ReceiveLoop: SessionClosed");
                         _running = false;
                         break;
                 }
             }
-            catch (IOException ex)
-            {
-                Diag($"CLIENT ReceiveLoop: IOException: {ex.Message}");
-                break;
-            }
-            catch (ObjectDisposedException ex)
-            {
-                Diag($"CLIENT ReceiveLoop: ObjectDisposedException: {ex.Message}");
-                break;
-            }
-            catch (Exception ex)
-            {
-                Diag($"CLIENT ReceiveLoop: Exception: {ex.GetType().Name}: {ex.Message}");
-                break;
-            }
+            catch (IOException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch { break; }
         }
 
-        Diag($"CLIENT ReceiveLoop exited. msgCount={msgCount} _running={_running}");
         // Server disconnected — exit
         _running = false;
         _inputReader?.Dispose();
@@ -300,7 +263,6 @@ public class WmuxClient
 
     private void RunLoop()
     {
-        Diag("CLIENT RunLoop entered");
         _running = true;
 
         // Ensure the console uses UTF-8 so Unicode characters are not
@@ -310,21 +272,18 @@ public class WmuxClient
 
         // Put the console into raw mode so control keys (Ctrl+B etc.)
         // are delivered without echoing ^B or being intercepted by the OS.
-        bool rawOk = RawConsole.Enable();
-        Diag($"CLIENT RunLoop: RawConsole.Enable returned {rawOk}");
+        RawConsole.Enable();
 
         // Enable alternate screen buffer and hide cursor
         Console.Write("\x1b[?1049h"); // Alt screen buffer
         Console.Write("\x1b[?25l");   // Hide cursor initially
         Console.CursorVisible = false;
-        Diag("CLIENT RunLoop: alt screen enabled");
 
         // Initial render
         _needsRender = true;
 
         // Create the low-level input reader
         _inputReader = new Win32InputReader();
-        Diag("CLIENT RunLoop: Win32InputReader created, starting render+resize threads");
 
         // Handle resize events
         _inputReader.WindowResized += (w, h) =>
@@ -519,7 +478,6 @@ public class WmuxClient
     private int _renderCount;
     private void RenderLoop()
     {
-        Diag("CLIENT RenderLoop started");
         while (_running)
         {
             if ((_needsRender || _statusMessage != null) && _renderer != null)
@@ -530,8 +488,6 @@ public class WmuxClient
                 {
                     if (_serverMode)
                     {
-                        if (_renderCount <= 5)
-                            Diag($"CLIENT RenderLoop: render #{_renderCount} serverMode=true lastSnapshot={(_lastSnapshot != null ? "SET" : "NULL")}");
                         RenderServerMode();
                     }
                     else if (_session != null)
@@ -539,14 +495,10 @@ public class WmuxClient
                         RenderStandaloneMode();
                     }
                 }
-                catch (Exception ex)
-                {
-                    Diag($"CLIENT RenderLoop: exception: {ex.GetType().Name}: {ex.Message}");
-                }
+                catch { }
             }
             Thread.Sleep(16); // ~60fps cap
         }
-        Diag("CLIENT RenderLoop exited");
     }
 
     private void RenderStandaloneMode()
