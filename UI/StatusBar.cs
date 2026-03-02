@@ -45,7 +45,11 @@ public static class StatusBar
             var activeWin = session.ActiveWindow;
             var panes = activeWin.GetPanes();
             int paneIdx = panes.IndexOf(activeWin.ActivePane) + 1;
-            right.Append($"[{paneIdx}/{panes.Count}] ");
+            var paneName = activeWin.ActivePane.Name;
+            if (paneName.Length > 0)
+                right.Append($"[{paneIdx}/{panes.Count} \"{paneName}\"] ");
+            else
+                right.Append($"[{paneIdx}/{panes.Count}] ");
             right.Append(DateTime.Now.ToString("HH:mm"));
 
             string leftStr = left.ToString();
@@ -99,7 +103,11 @@ public static class StatusBar
             var activeWin = session.ActiveWindow;
             var panes = activeWin.GetPanes();
             int paneIdx = panes.IndexOf(activeWin.ActivePane) + 1;
-            right.Append($"[{paneIdx}/{panes.Count}] ");
+            var paneName = activeWin.ActivePane.Name;
+            if (paneName.Length > 0)
+                right.Append($"[{paneIdx}/{panes.Count} \"{paneName}\"] ");
+            else
+                right.Append($"[{paneIdx}/{panes.Count}] ");
             right.Append(DateTime.Now.ToString("HH:mm"));
 
             string leftStr = left.ToString();

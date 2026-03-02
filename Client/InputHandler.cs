@@ -28,11 +28,14 @@ public class InputHandler
     private int _activationIndex;
     private readonly List<ConsoleKeyInfo> _pendingKeys = new();
     private bool _renameMode;
+    private bool _paneRenameMode;
     private string _renameBuffer = "";
     private string _lineBuffer = "";
 
     // Selection mode routing flag (actual cursor/scroll state lives on Pane)
     private bool _selectionMode;
+
+    private Pane? _lastActivePane;
 
     public event Action? RequestDetach;
     public event Action? RequestExit;
@@ -91,6 +94,18 @@ public class InputHandler
     /// <summary>True when the pane is in selection (copy) mode.</summary>
     public bool IsSelectionMode => _selectionMode;
 
+    /// <summary>True when the user is in rename mode (window or pane).</summary>
+    public bool IsRenameMode => _renameMode || _paneRenameMode;
+
+    /// <summary>
+    /// The rename prompt to display in the status bar, e.g. "(rename-pane) myname".
+    /// Returns null if not in rename mode.
+    /// </summary>
+    public string? RenamePrompt =>
+        _paneRenameMode ? $"(rename-pane) {_renameBuffer}" :
+        _renameMode ? $"(rename-window) {_renameBuffer}" :
+        null;
+
     /// <summary>
     /// Flush the pending/active prefix state as if the user never intended
     /// to issue a command. Returns the literal characters to forward to the
@@ -143,6 +158,20 @@ public class InputHandler
     }
 
     /// <summary>
+    /// Flash the active pane's name in the status bar if the active pane changed
+    /// and the new pane has a name.
+    /// </summary>
+    public void NotifyPaneActivated(Pane pane)
+    {
+        if (pane != _lastActivePane && pane.Name.Length > 0)
+        {
+            StatusMessage?.Invoke($"Pane: {pane.Name}",
+                ConsoleColor.Black, ConsoleColor.Green);
+        }
+        _lastActivePane = pane;
+    }
+
+    /// <summary>
     /// Process a key press. Returns true if the key was consumed (not forwarded to pane).
     /// </summary>
     public bool HandleKey(ConsoleKeyInfo key, Session session, CommandLine commandLine, out string? command)
@@ -164,17 +193,24 @@ public class InputHandler
             return true;
         }
 
-        // Rename mode
-        if (_renameMode)
+        // Rename mode (window or pane)
+        if (_renameMode || _paneRenameMode)
         {
             if (key.Key == ConsoleKey.Enter)
             {
+                if (_paneRenameMode && _renameBuffer.Length > 0)
+                {
+                    StatusMessage?.Invoke($"Pane: {_renameBuffer}",
+                        ConsoleColor.Black, ConsoleColor.Green);
+                }
                 _renameMode = false;
+                _paneRenameMode = false;
                 return true;
             }
             if (key.Key == ConsoleKey.Escape)
             {
                 _renameMode = false;
+                _paneRenameMode = false;
                 return true;
             }
             if (key.Key == ConsoleKey.Backspace)
@@ -182,14 +218,20 @@ public class InputHandler
                 if (_renameBuffer.Length > 0)
                 {
                     _renameBuffer = _renameBuffer[..^1];
-                    session.ActiveWindow.Name = _renameBuffer;
+                    if (_paneRenameMode)
+                        session.ActiveWindow.ActivePane.Name = _renameBuffer;
+                    else
+                        session.ActiveWindow.Name = _renameBuffer;
                 }
                 return true;
             }
             if (key.KeyChar >= ' ')
             {
                 _renameBuffer += key.KeyChar;
-                session.ActiveWindow.Name = _renameBuffer;
+                if (_paneRenameMode)
+                    session.ActiveWindow.ActivePane.Name = _renameBuffer;
+                else
+                    session.ActiveWindow.Name = _renameBuffer;
             }
             return true;
         }
@@ -229,14 +271,15 @@ public class InputHandler
             if (key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow or ConsoleKey.LeftArrow or ConsoleKey.RightArrow)
             {
                 window.NavigatePane(key.Key);
+                NotifyPaneActivated(window.ActivePane);
                 return true;
             }
 
             // hjkl pane navigation
-            if (key.KeyChar == 'h') { window.NavigatePane(ConsoleKey.LeftArrow); return true; }
-            if (key.KeyChar == 'j') { window.NavigatePane(ConsoleKey.DownArrow); return true; }
-            if (key.KeyChar == 'k') { window.NavigatePane(ConsoleKey.UpArrow); return true; }
-            if (key.KeyChar == 'l') { window.NavigatePane(ConsoleKey.RightArrow); return true; }
+            if (key.KeyChar == 'h') { window.NavigatePane(ConsoleKey.LeftArrow); NotifyPaneActivated(window.ActivePane); return true; }
+            if (key.KeyChar == 'j') { window.NavigatePane(ConsoleKey.DownArrow); NotifyPaneActivated(window.ActivePane); return true; }
+            if (key.KeyChar == 'k') { window.NavigatePane(ConsoleKey.UpArrow); NotifyPaneActivated(window.ActivePane); return true; }
+            if (key.KeyChar == 'l') { window.NavigatePane(ConsoleKey.RightArrow); NotifyPaneActivated(window.ActivePane); return true; }
 
             char ch = key.KeyChar;
 
@@ -298,6 +341,12 @@ public class InputHandler
                 _renameBuffer = window.Name;
                 return true;
             }
+            if (ch == _keys.RenamePane)
+            {
+                _paneRenameMode = true;
+                _renameBuffer = window.ActivePane.Name;
+                return true;
+            }
             if (ch == _keys.KillWindow)
             {
                 if (session.Windows.Count > 1)
@@ -309,6 +358,7 @@ public class InputHandler
             if (ch == _keys.NextPane)
             {
                 window.NextPane();
+                NotifyPaneActivated(window.ActivePane);
                 return true;
             }
             if (ch == _keys.CycleLayout)
@@ -367,18 +417,29 @@ public class InputHandler
         }
 
         // Rename mode — buffer keystrokes locally, send command on Enter
-        if (_renameMode)
+        if (_renameMode || _paneRenameMode)
         {
             if (key.Key == ConsoleKey.Enter)
             {
-                _renameMode = false;
                 if (_renameBuffer.Length > 0)
-                    action = $"rename-window {_renameBuffer}";
+                {
+                    if (_paneRenameMode)
+                    {
+                        action = $"rename-pane {_renameBuffer}";
+                        StatusMessage?.Invoke($"Pane: {_renameBuffer}",
+                            ConsoleColor.Black, ConsoleColor.Green);
+                    }
+                    else
+                        action = $"rename-window {_renameBuffer}";
+                }
+                _renameMode = false;
+                _paneRenameMode = false;
                 return true;
             }
             if (key.Key == ConsoleKey.Escape)
             {
                 _renameMode = false;
+                _paneRenameMode = false;
                 return true;
             }
             if (key.Key == ConsoleKey.Backspace)
@@ -447,6 +508,12 @@ public class InputHandler
             if (ch == _keys.RenameWindow)
             {
                 _renameMode = true;
+                _renameBuffer = "";
+                return true;
+            }
+            if (ch == _keys.RenamePane)
+            {
+                _paneRenameMode = true;
                 _renameBuffer = "";
                 return true;
             }

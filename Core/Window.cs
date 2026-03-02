@@ -47,6 +47,8 @@ public class Window : IDisposable
     public Pane? SplitPane(SplitDirection direction)
     {
         var newPane = Layout.Split(ActivePane, direction, Width, Height);
+        if (newPane != null)
+            ActivePane = newPane;
         return newPane;
     }
 

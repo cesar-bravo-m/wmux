@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Sockets;
 using Wmux.Client;
 using Wmux.Config;
@@ -47,24 +48,15 @@ static class Program
 
         if (args.Length == 0)
         {
-            // Default: start embedded server (if needed) + attach as first client
             int port = WmuxServer.GetServerPort();
             if (port <= 0)
             {
-                var server = new WmuxServer { EmbeddedMode = true };
-                var serverTask = Task.Run(() => server.RunAsync());
-
-                // Wait for the server to create its pipe before the client tries to connect.
-                if (!server.Ready.Wait(5000))
+                port = LaunchServerProcess();
+                if (port <= 0)
                 {
-                    if (serverTask.IsFaulted)
-                        Console.Error.WriteLine($"wmux server failed to start: {serverTask.Exception?.InnerException?.Message}");
-                    else
-                        Console.Error.WriteLine("wmux server did not become ready within 5 seconds.");
+                    Console.Error.WriteLine("wmux server failed to start.");
                     return 1;
                 }
-
-                port = server.Port;
             }
 
             var client = new WmuxClient(config);
@@ -85,23 +77,16 @@ static class Program
                         name = args[++i];
                 }
 
-                // Start embedded server if not running
+                // Ensure a server is running
                 int port = WmuxServer.GetServerPort();
                 if (port <= 0)
                 {
-                    var server = new WmuxServer { EmbeddedMode = true };
-                    var serverTask = Task.Run(() => server.RunAsync());
-
-                    if (!server.Ready.Wait(5000))
+                    port = LaunchServerProcess();
+                    if (port <= 0)
                     {
-                        if (serverTask.IsFaulted)
-                            Console.Error.WriteLine($"wmux server failed to start: {serverTask.Exception?.InnerException?.Message}");
-                        else
-                            Console.Error.WriteLine("wmux server did not become ready within 5 seconds.");
+                        Console.Error.WriteLine("wmux server failed to start.");
                         return 1;
                     }
-
-                    port = server.Port;
                 }
 
                 var client = new WmuxClient(config);
@@ -173,7 +158,7 @@ static class Program
                 return 0;
 
             case "version" or "--version" or "-v":
-                Console.WriteLine("wmux 0.1.0");
+                Console.WriteLine("wmux 0.0.2");
                 return 0;
 
             default:
@@ -182,6 +167,85 @@ static class Program
                 PrintHelp();
                 return 1;
         }
+    }
+
+    /// <summary>
+    /// Launch a wmux server as a detached background process and wait for it to be ready.
+    /// Returns the server port, or -1 on failure.
+    /// </summary>
+    static int LaunchServerProcess()
+    {
+        var exePath = Environment.ProcessPath;
+        var dllPath = System.Reflection.Assembly.GetEntryAssembly()?.Location;
+        string fileName, arguments;
+
+        // Prefer launching via 'dotnet <dll>' — this avoids BadImageFormatException
+        // issues that can occur when the apphost exe is launched with CreateNoWindow.
+        if (!string.IsNullOrEmpty(dllPath) && File.Exists(dllPath))
+        {
+            // Find dotnet.exe: either it's our current process, or look it up
+            string dotnet;
+            if (exePath != null &&
+                Path.GetFileNameWithoutExtension(exePath)
+                    .Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            {
+                dotnet = exePath;
+            }
+            else
+            {
+                dotnet = "dotnet";
+            }
+            fileName = dotnet;
+            arguments = $"\"{dllPath}\" start-server";
+        }
+        else if (exePath != null)
+        {
+            // Fallback: run the exe directly
+            fileName = exePath;
+            arguments = "start-server";
+        }
+        else
+        {
+            return -1;
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+        };
+
+        Process? proc;
+        try
+        {
+            proc = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to start server process: {ex.Message}");
+            return -1;
+        }
+
+        if (proc == null) return -1;
+
+        // Poll for server readiness (lock file appears once listener is up)
+        for (int i = 0; i < 50; i++) // 5 seconds max
+        {
+            Thread.Sleep(100);
+            if (proc.HasExited)
+            {
+                var stderr = proc.StandardError.ReadToEnd().Trim();
+                if (!string.IsNullOrEmpty(stderr))
+                    Console.Error.WriteLine($"Server process failed: {stderr}");
+                return -1;
+            }
+            int port = WmuxServer.GetServerPort();
+            if (port > 0) return port;
+        }
+        return -1;
     }
 
     static void ListSessions(int port)
@@ -223,7 +287,7 @@ static class Program
         Console.WriteLine(@"wmux - Terminal Multiplexer for Windows
 
 Usage:
-  wmux [options]                        Start server + create/attach session ""0""
+  wmux [options]                        Create/attach session (starts server if needed)
   wmux [options] new-session [-s name]  Create a new session
   wmux [options] attach [name] [-t name]  Attach to an existing session
   wmux start-server                     Start a standalone background server
@@ -246,6 +310,7 @@ Key Bindings (after activation string):
   | / v     Split pane vertically (left/right)
   Arrow     Navigate between panes
   c         New window
+  r         Rename pane
   n / p     Next / previous window
   0-9       Select window by number
   d         Detach from session

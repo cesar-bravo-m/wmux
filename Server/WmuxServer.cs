@@ -32,9 +32,6 @@ public class WmuxServer
     // Tracks which pane IDs have been wired for events
     private readonly HashSet<int> _wiredPaneIds = new();
 
-    // When true, auto-shutdown when last client disconnects
-    public bool EmbeddedMode { get; set; }
-
     /// <summary>
     /// The actual TCP port the server is listening on.
     /// </summary>
@@ -199,22 +196,14 @@ public class WmuxServer
         catch { }
         finally
         {
-            bool shouldShutdown = false;
             lock (_lock)
             {
                 _clients.Remove(client);
                 if (client.Session != null)
                     client.Session = null;
-
-                // Auto-shutdown in embedded mode when last client disconnects
-                if (EmbeddedMode && _clients.Count == 0)
-                    shouldShutdown = true;
             }
 
             try { client.Dispose(); } catch { }
-
-            if (shouldShutdown)
-                Shutdown();
         }
     }
 
@@ -600,7 +589,7 @@ public class WmuxServer
             _sessions.Remove(session.Id);
             _dirtySessions.Remove(session.Id);
 
-            if (EmbeddedMode && _sessions.Count == 0)
+            if (_sessions.Count == 0)
                 shouldCancel = true;
         }
 

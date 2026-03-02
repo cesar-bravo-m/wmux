@@ -521,6 +521,12 @@ public class WmuxClient
             sFg = ConsoleColor.Black;
             sBg = ConsoleColor.Yellow;
         }
+        else if (_inputHandler != null && _inputHandler.IsRenameMode)
+        {
+            cmdInput = _inputHandler.RenamePrompt;
+            sFg = ConsoleColor.Black;
+            sBg = ConsoleColor.Yellow;
+        }
         else if (_inputHandler != null && (_inputHandler.IsPrefixActive || _inputHandler.IsPrefixPending))
         {
             cmdInput = _inputHandler.PrefixProgress;
@@ -561,6 +567,12 @@ public class WmuxClient
         if (!cmdMode && _inputHandler != null && _inputHandler.IsSelectionMode)
         {
             statusOverlay = "selection mode";
+            sFg = ConsoleColor.Black;
+            sBg = ConsoleColor.Yellow;
+        }
+        else if (!cmdMode && _inputHandler != null && _inputHandler.IsRenameMode)
+        {
+            statusOverlay = _inputHandler.RenamePrompt;
             sFg = ConsoleColor.Black;
             sBg = ConsoleColor.Yellow;
         }

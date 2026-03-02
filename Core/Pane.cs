@@ -11,6 +11,7 @@ public class Pane : IDisposable
     private static int _nextId = 1;
 
     public int Id { get; }
+    public string Name { get; set; } = "";
     public ConPtyProcess Process { get; }
     public ScreenBuffer Screen { get; private set; }
     public VtParser Parser { get; } = new();
@@ -77,7 +78,14 @@ public class Pane : IDisposable
             while (_running && !Process.HasExited)
             {
                 int bytesRead = Process.OutputStream.Read(buffer, 0, buffer.Length);
-                if (bytesRead <= 0) break;
+                if (bytesRead <= 0)
+                {
+                    // Pipe closed. If the main process is still alive (e.g. a
+                    // nested child like WSL/bash exited but the shell continues),
+                    // wait for the actual process to exit before reporting.
+                    WaitForProcessExit();
+                    break;
+                }
 
                 int charCount = decoder.GetChars(buffer, 0, bytesRead, charBuf, 0);
                 if (charCount > 0)
@@ -90,11 +98,25 @@ public class Pane : IDisposable
                 }
             }
         }
-        catch (IOException) { }
+        catch (IOException)
+        {
+            WaitForProcessExit();
+        }
         catch (ObjectDisposedException) { }
 
         // Notify that the child process has exited
         ProcessExited?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Block until the main shell process actually exits or the pane is disposed.
+    /// Called when the ConPTY pipe closes prematurely (e.g. a nested process
+    /// like WSL/bash exits while the parent shell is still running).
+    /// </summary>
+    private void WaitForProcessExit()
+    {
+        while (_running && !Process.HasExited)
+            Thread.Sleep(100);
     }
 
     public void Resize(int left, int top, int width, int height)

@@ -17,6 +17,7 @@ public class CommandRegistry
             "kill-window" or "killw" => KillWindow(session),
             "select-window" or "selectw" => SelectWindow(cmd, session),
             "rename-window" or "renamew" => RenameWindow(cmd, session),
+            "rename-pane" or "renamep" => RenamePane(cmd, session),
             "select-pane" or "selectp" => SelectPane(cmd, session),
             "resize-pane" or "resizep" => ResizePane(cmd, session),
             "list-windows" or "lsw" => ListWindows(session),
@@ -107,8 +108,16 @@ public class CommandRegistry
         return null;
     }
 
+    private string? RenamePane(ParsedCommand cmd, Session session)
+    {
+        if (cmd.Args.Length > 0)
+            session.ActiveWindow.ActivePane.Name = string.Join(" ", cmd.Args);
+        return null;
+    }
+
     private string? SelectPane(ParsedCommand cmd, Session session)
     {
+        var before = session.ActiveWindow.ActivePane;
         foreach (var arg in cmd.Args)
         {
             switch (arg)
@@ -119,6 +128,9 @@ public class CommandRegistry
                 case "-R": session.ActiveWindow.NavigatePane(ConsoleKey.RightArrow); break;
             }
         }
+        var after = session.ActiveWindow.ActivePane;
+        if (after != before && after.Name.Length > 0)
+            return $"Pane: {after.Name}";
         return null;
     }
 
@@ -140,7 +152,10 @@ public class CommandRegistry
     {
         var panes = session.ActiveWindow.GetPanes();
         var lines = panes.Select((p, i) =>
-            $"{i}: [{p.Width}x{p.Height}] at ({p.Left},{p.Top}){(p == session.ActiveWindow.ActivePane ? " (active)" : "")}");
+        {
+            var nameStr = p.Name.Length > 0 ? $" \"{p.Name}\"" : "";
+            return $"{i}:{nameStr} [{p.Width}x{p.Height}] at ({p.Left},{p.Top}){(p == session.ActiveWindow.ActivePane ? " (active)" : "")}";
+        });
         return string.Join("\n", lines);
     }
 
@@ -169,7 +184,11 @@ public class CommandRegistry
 
     private string? NextPane(Session session)
     {
+        var before = session.ActiveWindow.ActivePane;
         session.ActiveWindow.NextPane();
+        var after = session.ActiveWindow.ActivePane;
+        if (after != before && after.Name.Length > 0)
+            return $"Pane: {after.Name}";
         return null;
     }
 
