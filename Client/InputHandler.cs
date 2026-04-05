@@ -267,11 +267,10 @@ public class InputHandler
                 return true;
             }
 
-            // Arrow key pane navigation
+            // Arrow key pane resize
             if (key.Key is ConsoleKey.UpArrow or ConsoleKey.DownArrow or ConsoleKey.LeftArrow or ConsoleKey.RightArrow)
             {
-                window.NavigatePane(key.Key);
-                NotifyPaneActivated(window.ActivePane);
+                window.ResizeActivePane(key.Key);
                 return true;
             }
 
@@ -280,6 +279,13 @@ public class InputHandler
             if (key.KeyChar == 'j') { window.NavigatePane(ConsoleKey.DownArrow); NotifyPaneActivated(window.ActivePane); return true; }
             if (key.KeyChar == 'k') { window.NavigatePane(ConsoleKey.UpArrow); NotifyPaneActivated(window.ActivePane); return true; }
             if (key.KeyChar == 'l') { window.NavigatePane(ConsoleKey.RightArrow); NotifyPaneActivated(window.ActivePane); return true; }
+
+            // Equalize pane sizes
+            if (key.KeyChar == '=')
+            {
+                window.EqualizeLayout();
+                return true;
+            }
 
             char ch = key.KeyChar;
 
@@ -479,17 +485,20 @@ public class InputHandler
                 return true;
             }
 
-            // Arrow key pane navigation
-            if (key.Key == ConsoleKey.UpArrow) { action = "select-pane -U"; return true; }
-            if (key.Key == ConsoleKey.DownArrow) { action = "select-pane -D"; return true; }
-            if (key.Key == ConsoleKey.LeftArrow) { action = "select-pane -L"; return true; }
-            if (key.Key == ConsoleKey.RightArrow) { action = "select-pane -R"; return true; }
+            // Arrow key pane resize
+            if (key.Key == ConsoleKey.UpArrow) { action = "resize-pane -U"; return true; }
+            if (key.Key == ConsoleKey.DownArrow) { action = "resize-pane -D"; return true; }
+            if (key.Key == ConsoleKey.LeftArrow) { action = "resize-pane -L"; return true; }
+            if (key.Key == ConsoleKey.RightArrow) { action = "resize-pane -R"; return true; }
 
             // hjkl pane navigation
             if (key.KeyChar == 'h') { action = "select-pane -L"; return true; }
             if (key.KeyChar == 'j') { action = "select-pane -D"; return true; }
             if (key.KeyChar == 'k') { action = "select-pane -U"; return true; }
             if (key.KeyChar == 'l') { action = "select-pane -R"; return true; }
+
+            // Equalize pane sizes
+            if (key.KeyChar == '=') { action = "resize-pane -Z"; return true; }
 
             char ch = key.KeyChar;
 

@@ -89,6 +89,18 @@ public class Window : IDisposable
         Layout.Recalculate(0, 0, width, height);
     }
 
+    public void ResizeActivePane(ConsoleKey direction, int amount = 5)
+    {
+        if (Layout.ResizePane(ActivePane, direction, amount, Width, Height))
+            Layout.Recalculate(0, 0, Width, Height);
+    }
+
+    public void EqualizeLayout()
+    {
+        Layout.EqualizeAll();
+        Layout.Recalculate(0, 0, Width, Height);
+    }
+
     public void NextPane()
     {
         var panes = GetPanes();

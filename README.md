@@ -2,8 +2,6 @@
 
 A terminal multiplexer for Windows, heavily inspired by tmux. Built on top of the Windows ConPTY API and .NET 10.
 
-Useful for running many claude instances in a single powershell terminal side by side.
-
 <img width="1635" height="976" alt="image" src="https://github.com/user-attachments/assets/7680baa2-1b90-4ca5-afa6-e8429ae11704" />
 
 ## Quickstart
@@ -24,7 +22,8 @@ Download the latest executable from the [releases page](https://github.com/cesar
 | `za !` | Send current pane to new window |
 | `za [` | Enter select mode |
 | `za [hjkl]` | Navigate panes |
-| `za [ArrowKeys]` | Navigate panes |
+| `za [ArrowKeys]` | Resize active pane |
+| `za =` | Equalize pane sizes |
 | `za c` | New window |
 | `za n/p` | Next/previous window |
 | `za d` | Detach terminal from wmux session |
@@ -33,8 +32,6 @@ Download the latest executable from the [releases page](https://github.com/cesar
 
 ## Todo
 
-- Interactive session selector
-- Investigate compatibility with different powershell versions.
 - Read configuration from wmux.yml
 
 ## License

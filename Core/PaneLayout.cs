@@ -103,16 +103,89 @@ public class PaneLayout
 
         if (node.Direction == SplitDirection.Vertical)
         {
-            int half = width / 2;
-            RecalcNode(node.First!, left, top, half, height);
-            RecalcNode(node.Second!, left + half + 1, top, width - half - 1, height);
+            int firstW = Math.Clamp((int)(width * node.Ratio), 1, width - 2);
+            RecalcNode(node.First!, left, top, firstW, height);
+            RecalcNode(node.Second!, left + firstW + 1, top, width - firstW - 1, height);
         }
         else
         {
-            int half = height / 2;
-            RecalcNode(node.First!, left, top, width, half);
-            RecalcNode(node.Second!, left, top + half + 1, width, height - half - 1);
+            int firstH = Math.Clamp((int)(height * node.Ratio), 1, height - 2);
+            RecalcNode(node.First!, left, top, width, firstH);
+            RecalcNode(node.Second!, left, top + firstH + 1, width, height - firstH - 1);
         }
+    }
+
+    public bool ResizePane(Pane target, ConsoleKey direction, int amount, int totalWidth, int totalHeight)
+    {
+        var path = new List<(LayoutNode node, bool wentFirst, int width, int height)>();
+        if (!BuildPathToLeaf(_root, target, totalWidth, totalHeight, path))
+            return false;
+
+        SplitDirection wantDir = direction is ConsoleKey.LeftArrow or ConsoleKey.RightArrow
+            ? SplitDirection.Vertical : SplitDirection.Horizontal;
+        bool increase = direction is ConsoleKey.RightArrow or ConsoleKey.DownArrow;
+
+        for (int i = path.Count - 1; i >= 0; i--)
+        {
+            var (node, _, w, h) = path[i];
+            if (node.Direction != wantDir) continue;
+
+            int dim = wantDir == SplitDirection.Vertical ? w : h;
+            double delta = (double)amount / dim;
+            node.Ratio = increase
+                ? Math.Clamp(node.Ratio + delta, 0.1, 0.9)
+                : Math.Clamp(node.Ratio - delta, 0.1, 0.9);
+            return true;
+        }
+        return false;
+    }
+
+    public void EqualizeAll()
+    {
+        ResetRatios(_root);
+    }
+
+    private void ResetRatios(LayoutNode node)
+    {
+        if (node.IsLeaf) return;
+        node.Ratio = 0.5;
+        ResetRatios(node.First!);
+        ResetRatios(node.Second!);
+    }
+
+    private bool BuildPathToLeaf(LayoutNode node, Pane target, int w, int h,
+        List<(LayoutNode, bool, int, int)> path)
+    {
+        if (node.IsLeaf)
+            return node.Pane == target;
+
+        int firstW, firstH, secondW, secondH;
+        if (node.Direction == SplitDirection.Vertical)
+        {
+            firstW = Math.Clamp((int)(w * node.Ratio), 1, w - 2);
+            firstH = h;
+            secondW = w - firstW - 1;
+            secondH = h;
+        }
+        else
+        {
+            firstW = w;
+            firstH = Math.Clamp((int)(h * node.Ratio), 1, h - 2);
+            secondW = w;
+            secondH = h - firstH - 1;
+        }
+
+        path.Add((node, true, w, h));
+        if (BuildPathToLeaf(node.First!, target, firstW, firstH, path))
+            return true;
+        path.RemoveAt(path.Count - 1);
+
+        path.Add((node, false, w, h));
+        if (BuildPathToLeaf(node.Second!, target, secondW, secondH, path))
+            return true;
+        path.RemoveAt(path.Count - 1);
+
+        return false;
     }
 
     public List<Pane> GetAllPanes()
@@ -243,6 +316,7 @@ public class PaneLayout
         public LayoutNode? First;
         public LayoutNode? Second;
         public SplitDirection Direction;
+        public double Ratio = 0.5;
         public bool IsLeaf => Pane != null;
 
         public LayoutNode(Pane pane) { Pane = pane; }

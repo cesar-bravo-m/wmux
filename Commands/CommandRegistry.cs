@@ -136,8 +136,37 @@ public class CommandRegistry
 
     private string? ResizePane(ParsedCommand cmd, Session session)
     {
-        // Simplified resize - recalculate layout
-        session.ActiveWindow.Resize(session.ActiveWindow.Width, session.ActiveWindow.Height);
+        var win = session.ActiveWindow;
+        int amount = 5;
+        ConsoleKey? direction = null;
+        bool equalize = false;
+
+        for (int i = 0; i < cmd.Args.Length; i++)
+        {
+            switch (cmd.Args[i])
+            {
+                case "-U": direction = ConsoleKey.UpArrow; break;
+                case "-D": direction = ConsoleKey.DownArrow; break;
+                case "-L": direction = ConsoleKey.LeftArrow; break;
+                case "-R": direction = ConsoleKey.RightArrow; break;
+                case "-Z": equalize = true; break;
+                default:
+                    if (int.TryParse(cmd.Args[i], out int n))
+                        amount = n;
+                    break;
+            }
+        }
+
+        if (equalize)
+        {
+            win.EqualizeLayout();
+            return null;
+        }
+
+        if (direction == null)
+            return "Usage: resize-pane [-U|-D|-L|-R] [amount] or resize-pane -Z";
+
+        win.ResizeActivePane(direction.Value, amount);
         return null;
     }
 
