@@ -412,9 +412,9 @@ public class InputHandlerTests
         var handler = new InputHandler(new KeyBindings());
         var commandLine = new Wmux.UI.CommandLine();
 
-        handler.HandleKeyServerMode(MakeKey('z', ConsoleKey.Z), commandLine, out _);
-        handler.HandleKeyServerMode(MakeKey('a', ConsoleKey.A), commandLine, out _);
-        bool consumed = handler.HandleKeyServerMode(MakeKey('[', ConsoleKey.Oem4), commandLine, out string? action);
+        handler.HandleKeyServerMode(MakeKey('z', ConsoleKey.Z), commandLine, out _, out _);
+        handler.HandleKeyServerMode(MakeKey('a', ConsoleKey.A), commandLine, out _, out _);
+        bool consumed = handler.HandleKeyServerMode(MakeKey('[', ConsoleKey.Oem4), commandLine, out string? action, out _);
 
         Assert.That(consumed, Is.True);
         Assert.That(action, Is.EqualTo("selection-enter"));
@@ -514,12 +514,12 @@ public class InputHandlerTests
         var commandLine = new Wmux.UI.CommandLine();
 
         // Enter selection mode
-        handler.HandleKeyServerMode(MakeKey('z', ConsoleKey.Z), commandLine, out _);
-        handler.HandleKeyServerMode(MakeKey('a', ConsoleKey.A), commandLine, out _);
-        handler.HandleKeyServerMode(MakeKey('[', ConsoleKey.Oem4), commandLine, out _);
+        handler.HandleKeyServerMode(MakeKey('z', ConsoleKey.Z), commandLine, out _, out _);
+        handler.HandleKeyServerMode(MakeKey('a', ConsoleKey.A), commandLine, out _, out _);
+        handler.HandleKeyServerMode(MakeKey('[', ConsoleKey.Oem4), commandLine, out _, out _);
 
         // Press SPACE
-        bool consumed = handler.HandleKeyServerMode(MakeKey(' ', ConsoleKey.Spacebar), commandLine, out string? action);
+        bool consumed = handler.HandleKeyServerMode(MakeKey(' ', ConsoleKey.Spacebar), commandLine, out string? action, out _);
         Assert.That(consumed, Is.True);
         Assert.That(action, Is.EqualTo("selection-toggle"));
     }

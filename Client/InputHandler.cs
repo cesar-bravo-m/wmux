@@ -35,6 +35,9 @@ public class InputHandler
     // Selection mode routing flag (actual cursor/scroll state lives on Pane)
     private bool _selectionMode;
 
+    // Help overlay — shows list of all prefix key bindings
+    private bool _helpMode;
+
     private Pane? _lastActivePane;
 
     public event Action? RequestDetach;
@@ -93,6 +96,9 @@ public class InputHandler
 
     /// <summary>True when the pane is in selection (copy) mode.</summary>
     public bool IsSelectionMode => _selectionMode;
+
+    /// <summary>True when the help overlay is visible.</summary>
+    public bool IsHelpMode => _helpMode;
 
     /// <summary>True when the user is in rename mode (window or pane).</summary>
     public bool IsRenameMode => _renameMode || _paneRenameMode;
@@ -369,13 +375,36 @@ public class InputHandler
                 _selectionMode = true;
                 return true;
             }
+            if (ch == _keys.PasteClipboard)
+            {
+                var text = ClipboardHelper.GetText();
+                if (text != null)
+                    window.ActivePane.WriteInput(text);
+                else
+                    StatusMessage?.Invoke("Clipboard empty", ConsoleColor.Black, ConsoleColor.Yellow);
+                return true;
+            }
             if (ch == _keys.BreakPane)
             {
                 if (!session.BreakPane())
                     StatusMessage?.Invoke("Cannot break: only one pane", ConsoleColor.Black, ConsoleColor.Yellow);
                 return true;
             }
-            return true; // Consume unknown prefix keys
+            if (ch == '?')
+            {
+                _helpMode = true;
+                return true;
+            }
+            // Unknown command — flush activation string + current key to shell
+            FlushActivationString();
+            return false;
+        }
+
+        // Help overlay dismisses on any key
+        if (_helpMode)
+        {
+            _helpMode = false;
+            return true;
         }
 
         // Not in prefix mode — normal key handling
@@ -394,9 +423,10 @@ public class InputHandler
     /// The out parameter 'action' is a command string to send to the server,
     /// or null if no server command is needed.
     /// </summary>
-    public bool HandleKeyServerMode(ConsoleKeyInfo key, CommandLine commandLine, out string? action)
+    public bool HandleKeyServerMode(ConsoleKeyInfo key, CommandLine commandLine, out string? action, out string? pasteText)
     {
         action = null;
+        pasteText = null;
         DeferredKeys.Clear();
 
         // Command mode takes priority
@@ -519,8 +549,31 @@ public class InputHandler
                 _selectionMode = true;
                 return true;
             }
+            if (ch == _keys.PasteClipboard)
+            {
+                var text = ClipboardHelper.GetText();
+                if (text != null)
+                    pasteText = text;
+                else
+                    StatusMessage?.Invoke("Clipboard empty", ConsoleColor.Black, ConsoleColor.Yellow);
+                return true;
+            }
             if (ch == _keys.BreakPane) { action = "break-pane"; return true; }
-            return true; // Consume unknown prefix keys
+            if (ch == '?')
+            {
+                _helpMode = true;
+                return true;
+            }
+            // Unknown command — flush activation string + current key to shell
+            FlushActivationString();
+            return false;
+        }
+
+        // Help overlay dismisses on any key
+        if (_helpMode)
+        {
+            _helpMode = false;
+            return true;
         }
 
         // Not in prefix mode — normal key handling
@@ -544,8 +597,8 @@ public class InputHandler
             return;
         }
 
-        // SPACE toggles highlight start / copies selection
-        if (key.Key == ConsoleKey.Spacebar)
+        // SPACE or ENTER toggles highlight start / copies selection
+        if (key.Key is ConsoleKey.Spacebar or ConsoleKey.Enter)
         {
             if (!pane.SelectionHighlightActive)
             {
@@ -584,8 +637,8 @@ public class InputHandler
             return;
         }
 
-        // SPACE toggles highlight start / copies selection (server decides which)
-        if (key.Key == ConsoleKey.Spacebar)
+        // SPACE or ENTER toggles highlight start / copies selection (server decides which)
+        if (key.Key is ConsoleKey.Spacebar or ConsoleKey.Enter)
         {
             action = "selection-toggle";
             return;
@@ -662,6 +715,21 @@ public class InputHandler
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Put the activation string characters into DeferredKeys so they are
+    /// forwarded to the shell as literal text. Called when the prefix was
+    /// fully matched but the command key is unrecognised.
+    /// </summary>
+    private void FlushActivationString()
+    {
+        foreach (char c in _keys.ActivationString)
+        {
+            DeferredKeys.Add(new ConsoleKeyInfo(c, default, false, false, false));
+            if (c >= ' ')
+                _lineBuffer += c;
+        }
     }
 
     /// <summary>
@@ -760,6 +828,47 @@ public class InputHandler
             ConsoleKey.F11 => "\x1b[23~",
             ConsoleKey.F12 => "\x1b[24~",
             _ => key.KeyChar != '\0' ? key.KeyChar.ToString() : ""
+        };
+    }
+
+    /// <summary>
+    /// Build the help overlay lines showing all prefix key bindings.
+    /// Uses the user's configured activation string and key bindings.
+    /// </summary>
+    public List<string> BuildHelpLines()
+    {
+        string act = _keys.ActivationString;
+        var lines = new List<string>
+        {
+            $"  {act} ?          List key bindings (this screen)",
+            $"  {act} {KeyName(_keys.SplitHorizontal)}          Split pane horizontally",
+            $"  {act} {KeyName(_keys.SplitVertical)}          Split pane vertically",
+            $"  {act} v          Split pane vertically",
+            $"  {act} {KeyName(_keys.NewWindow)}          New window",
+            $"  {act} {KeyName(_keys.NextWindow)}          Next window",
+            $"  {act} {KeyName(_keys.PrevWindow)}          Previous window",
+            $"  {act} 0-9        Select window by number",
+            $"  {act} {KeyName(_keys.NextPane)}          Next pane",
+            $"  {act} h/j/k/l    Navigate panes (left/down/up/right)",
+            $"  {act} Arrows     Resize active pane",
+            $"  {act} =          Equalize pane sizes",
+            $"  {act} {KeyName(_keys.CycleLayout)}      Cycle layout",
+            $"  {act} {KeyName(_keys.RenameWindow)}          Rename window",
+            $"  {act} {KeyName(_keys.RenamePane)}          Rename pane",
+            $"  {act} {KeyName(_keys.KillPane)}          Kill pane",
+            $"  {act} {KeyName(_keys.KillWindow)}          Kill window",
+            $"  {act} {KeyName(_keys.BreakPane)}          Break pane to new window",
+            $"  {act} {KeyName(_keys.CopyMode)}          Enter copy/selection mode",
+            $"  {act} {KeyName(_keys.PasteClipboard)}          Paste from clipboard",
+            $"  {act} {KeyName(_keys.CommandMode)}          Enter command mode",
+            $"  {act} {KeyName(_keys.Detach)}          Detach from session",
+        };
+        return lines;
+
+        static string KeyName(char c) => c switch
+        {
+            ' ' => "Space",
+            _ => c.ToString(),
         };
     }
 }

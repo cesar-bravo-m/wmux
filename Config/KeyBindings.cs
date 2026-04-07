@@ -28,4 +28,5 @@ public class KeyBindings
     public char CycleLayout { get; set; } = ' ';
     public char RenamePane { get; set; } = 'r';
     public char BreakPane { get; set; } = '!';
+    public char PasteClipboard { get; set; } = ']';
 }

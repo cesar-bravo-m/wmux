@@ -338,6 +338,11 @@ public class WmuxClient
             _inputReader.Dispose();
             _inputReader = null;
 
+            // Flush any stray input events (e.g. the dummy key injected by
+            // Win32InputReader.Dispose) so the calling shell doesn't echo them.
+            ConPtyNative.FlushConsoleInputBuffer(
+                ConPtyNative.GetStdHandle(ConPtyNative.STD_INPUT_HANDLE));
+
             RawConsole.Restore();
 
             // Restore terminal
@@ -403,7 +408,7 @@ public class WmuxClient
     {
         if (_inputHandler == null) return;
 
-        bool consumed = _inputHandler.HandleKeyServerMode(key, _commandLine, out string? action);
+        bool consumed = _inputHandler.HandleKeyServerMode(key, _commandLine, out string? action, out string? pasteText);
 
         // Forward any deferred keys (flushed 'z' from prefix sequence)
         foreach (var deferred in _inputHandler.DeferredKeys)
@@ -412,6 +417,9 @@ public class WmuxClient
             if (dVt.Length > 0)
                 SendToServer(new InputMessage { Data = dVt });
         }
+
+        if (pasteText != null)
+            SendToServer(new InputMessage { Data = pasteText });
 
         if (action != null)
             SendToServer(new CommandMessage { Command = action });
@@ -544,10 +552,12 @@ public class WmuxClient
             _statusMessage = null;
         }
 
+        var helpLines = _inputHandler?.IsHelpMode == true ? _inputHandler.BuildHelpLines() : null;
+
         lock (_renderLock)
         {
             if (!_running || _session.Windows.Count == 0) return;
-            _renderer.Render(_session, cmdInput, sFg, sBg, cmdMode);
+            _renderer.Render(_session, cmdInput, sFg, sBg, cmdMode, helpLines);
         }
     }
 
@@ -593,9 +603,11 @@ public class WmuxClient
             _statusMessage = null;
         }
 
+        var helpLines = _inputHandler?.IsHelpMode == true ? _inputHandler.BuildHelpLines() : null;
+
         lock (_renderLock)
         {
-            _renderer.RenderSnapshot(snapshot, cmdInput, statusOverlay, sFg, sBg, cmdMode);
+            _renderer.RenderSnapshot(snapshot, cmdInput, statusOverlay, sFg, sBg, cmdMode, helpLines);
         }
     }
 

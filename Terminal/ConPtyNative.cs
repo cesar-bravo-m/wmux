@@ -91,6 +91,10 @@ internal static class ConPtyNative
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool FlushConsoleInputBuffer(IntPtr hConsoleInput);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetNumberOfConsoleInputEvents(
         IntPtr hConsoleInput,
         out uint lpcNumberOfEvents);

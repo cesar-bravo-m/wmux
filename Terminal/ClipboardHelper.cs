@@ -32,8 +32,44 @@ internal static class ClipboardHelper
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalUnlock(IntPtr hMem);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetClipboardData(uint uFormat);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern UIntPtr GlobalSize(IntPtr hMem);
+
     private const uint CF_UNICODETEXT = 13;
     private const uint GMEM_MOVEABLE = 0x0002;
+
+    /// <summary>
+    /// Read Unicode text from the Windows clipboard.
+    /// Returns null if the clipboard is empty or doesn't contain text.
+    /// </summary>
+    public static string? GetText()
+    {
+        if (!OpenClipboard(IntPtr.Zero))
+            return null;
+        try
+        {
+            var hData = GetClipboardData(CF_UNICODETEXT);
+            if (hData == IntPtr.Zero) return null;
+
+            var ptr = GlobalLock(hData);
+            if (ptr == IntPtr.Zero) return null;
+            try
+            {
+                return Marshal.PtrToStringUni(ptr);
+            }
+            finally
+            {
+                GlobalUnlock(hData);
+            }
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
 
     /// <summary>
     /// Copy the given text to the Windows clipboard.

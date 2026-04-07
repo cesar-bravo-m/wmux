@@ -36,7 +36,7 @@ public class Renderer
     /// </summary>
     public void Render(Session session, string? commandInput = null,
         ConsoleColor statusFg = ConsoleColor.Black, ConsoleColor statusBg = ConsoleColor.Green,
-        bool commandMode = false)
+        bool commandMode = false, List<string>? helpLines = null)
     {
         var window = session.ActiveWindow;
         var panes = window.GetPanes();
@@ -152,6 +152,12 @@ public class Renderer
             cursorVisible = commandMode ? false : activePane.Screen.CursorVisible;
         }
 
+        if (helpLines != null)
+        {
+            DrawHelpOverlay(helpLines, chars, fg, bg, _width, _height);
+            cursorVisible = false;
+        }
+
         FlushToTerminal(chars, fg, bg, cursorRow, cursorCol, cursorVisible);
     }
 
@@ -161,7 +167,7 @@ public class Renderer
     public void RenderSnapshot(ScreenSnapshotMessage snapshot,
         string? commandInput = null, string? statusOverlay = null,
         ConsoleColor statusFg = ConsoleColor.Black, ConsoleColor statusBg = ConsoleColor.Green,
-        bool commandMode = false)
+        bool commandMode = false, List<string>? helpLines = null)
     {
         int w = snapshot.Width;
         int h = snapshot.Height;
@@ -234,6 +240,12 @@ public class Renderer
         int cursorRow = snapshot.CursorRow;
         int cursorCol = snapshot.CursorCol;
         bool cursorVisible = commandMode ? false : snapshot.CursorVisible;
+
+        if (helpLines != null)
+        {
+            DrawHelpOverlay(helpLines, chars, fg, bg, renderW, renderH);
+            cursorVisible = false;
+        }
 
         FlushToTerminal(chars, fg, bg, cursorRow, cursorCol, cursorVisible);
     }
@@ -424,4 +436,131 @@ public class Renderer
         ConsoleColor.White => 107,
         _ => 40
     };
+
+    /// <summary>
+    /// Draw a centered help overlay onto the character/color grids.
+    /// </summary>
+    internal static void DrawHelpOverlay(List<string> helpLines,
+        char[,] chars, ConsoleColor[,] fg, ConsoleColor[,] bg,
+        int gridW, int gridH)
+    {
+        const string title = " Key Bindings ";
+        const string footer = " Press any key to close ";
+        int contentWidth = 0;
+        foreach (var line in helpLines)
+            if (line.Length > contentWidth) contentWidth = line.Length;
+        if (title.Length > contentWidth) contentWidth = title.Length;
+        if (footer.Length > contentWidth) contentWidth = footer.Length;
+
+        // Box dimensions (content + 2 for left/right border)
+        int boxW = contentWidth + 4; // "│ " + content + " │"
+        int boxH = helpLines.Count + 4; // top border + title + lines + bottom border
+
+        // Clamp to terminal size
+        if (boxW > gridW) boxW = gridW;
+        if (boxH > gridH) boxH = gridH;
+
+        int innerW = boxW - 4; // usable text width
+
+        int startX = (gridW - boxW) / 2;
+        int startY = (gridH - boxH) / 2;
+        if (startX < 0) startX = 0;
+        if (startY < 0) startY = 0;
+
+        var boxFg = ConsoleColor.White;
+        var boxBg = ConsoleColor.DarkBlue;
+        var titleFg = ConsoleColor.Yellow;
+
+        // Helper to fill a row
+        void FillRow(int row, string text, ConsoleColor textFg)
+        {
+            if (row < 0 || row >= gridH) return;
+            for (int x = 0; x < boxW && startX + x < gridW; x++)
+            {
+                int gx = startX + x;
+                if (x == 0 || x == boxW - 1)
+                {
+                    chars[row, gx] = '│';
+                    fg[row, gx] = boxFg;
+                }
+                else if (x == 1)
+                {
+                    chars[row, gx] = ' ';
+                    fg[row, gx] = textFg;
+                }
+                else if (x == boxW - 2)
+                {
+                    chars[row, gx] = ' ';
+                    fg[row, gx] = textFg;
+                }
+                else
+                {
+                    int ci = x - 2; // index into text content
+                    chars[row, gx] = ci < text.Length ? text[ci] : ' ';
+                    fg[row, gx] = textFg;
+                }
+                bg[row, gx] = boxBg;
+            }
+        }
+
+        // Top border: ┌─── Title ───┐
+        int y = startY;
+        if (y < gridH)
+        {
+            for (int x = 0; x < boxW && startX + x < gridW; x++)
+            {
+                int gx = startX + x;
+                if (x == 0) chars[y, gx] = '┌';
+                else if (x == boxW - 1) chars[y, gx] = '┐';
+                else chars[y, gx] = '─';
+                fg[y, gx] = boxFg;
+                bg[y, gx] = boxBg;
+            }
+            // Center the title on the top border
+            int titleStart = (boxW - title.Length) / 2;
+            for (int i = 0; i < title.Length && titleStart + i < boxW && startX + titleStart + i < gridW; i++)
+            {
+                chars[y, startX + titleStart + i] = title[i];
+                fg[y, startX + titleStart + i] = titleFg;
+            }
+        }
+
+        // Content rows
+        int maxLines = boxH - 4; // lines we can actually show
+        for (int i = 0; i < maxLines && i < helpLines.Count; i++)
+        {
+            int row = startY + 1 + i;
+            string text = helpLines[i].Length > innerW ? helpLines[i][..innerW] : helpLines[i];
+            FillRow(row, text, boxFg);
+        }
+
+        // Empty separator row before footer
+        int sepRow = startY + 1 + maxLines;
+        if (sepRow < gridH)
+            FillRow(sepRow, "", boxFg);
+
+        // Footer row with centered text
+        int footerRow = startY + 2 + maxLines;
+        if (footerRow < gridH)
+        {
+            string centeredFooter = footer.Length >= innerW ? footer[..innerW]
+                : new string(' ', (innerW - footer.Length) / 2) + footer;
+            FillRow(footerRow, centeredFooter, ConsoleColor.DarkGray);
+        }
+
+        // Bottom border: └───────────┘
+        int bottomRow = startY + boxH - 1;
+        if (bottomRow < gridH)
+        {
+            for (int x = 0; x < boxW && startX + x < gridW; x++)
+            {
+                int gx = startX + x;
+                if (x == 0) chars[bottomRow, gx] = '└';
+                else if (x == boxW - 1) chars[bottomRow, gx] = '┘';
+                else chars[bottomRow, gx] = '─';
+                fg[bottomRow, gx] = boxFg;
+                bg[bottomRow, gx] = boxBg;
+            }
+        }
+    }
 }

@@ -32,6 +32,7 @@ public class CommandRegistry
             "selection-exit" => SelectionExit(session),
             "selection-move" => SelectionMove(cmd, session),
             "selection-toggle" => SelectionToggle(session),
+            "paste-clipboard" or "pasteb" => PasteClipboard(session),
             _ => $"Unknown command: {cmd.Name}"
         };
     }
@@ -306,5 +307,13 @@ public class CommandRegistry
             pane.ExitSelectionMode();
             return "selection copied to clipboard";
         }
+    }
+
+    private string? PasteClipboard(Session session)
+    {
+        var text = Terminal.ClipboardHelper.GetText();
+        if (text == null) return "clipboard empty";
+        session.ActiveWindow.ActivePane.WriteInput(text);
+        return null;
     }
 }
