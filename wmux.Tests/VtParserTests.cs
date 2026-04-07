@@ -472,4 +472,43 @@ public class VtParserTests
         Parse("\x1b[B"); // No param = default 1
         Assert.That(_screen.CursorRow, Is.EqualTo(1));
     }
+
+    // ── Colon sub-parameters (SGR RGB) ────────────────────────────────
+
+    [Test]
+    public void ColonSgr_ForegroundRgb_WithColorSpace()
+    {
+        // \e[38:2::255:0:0m — colon-delimited RGB with empty color space ID
+        Parse("\x1b[38:2::255:0:0mA");
+        Assert.That(_screen.Chars[0][0], Is.EqualTo('A'));
+        Assert.That(_screen.FgColors[0][0], Is.EqualTo(ConsoleColor.Red));
+    }
+
+    [Test]
+    public void ColonSgr_ForegroundRgb_WithoutColorSpace()
+    {
+        // \e[38:2:0:255:0m — colon-delimited RGB without color space (5 params)
+        Parse("\x1b[38:2:0:255:0mA");
+        Assert.That(_screen.Chars[0][0], Is.EqualTo('A'));
+        Assert.That(_screen.FgColors[0][0], Is.EqualTo(ConsoleColor.Green));
+    }
+
+    [Test]
+    public void ColonSgr_BackgroundRgb_WithColorSpace()
+    {
+        // \e[48:2::0:0:255m — colon-delimited background RGB
+        Parse("\x1b[48:2::0:0:255mA");
+        Assert.That(_screen.Chars[0][0], Is.EqualTo('A'));
+        Assert.That(_screen.BgColors[0][0], Is.EqualTo(ConsoleColor.Blue));
+    }
+
+    [Test]
+    public void ColonSgr_DoesNotPrintSequenceAsText()
+    {
+        // The bug: colon params were printed as literal text
+        Parse("\x1b[38:2::255:0:0mHello");
+        Assert.That(_screen.Chars[0][0], Is.EqualTo('H'));
+        Assert.That(_screen.Chars[0][4], Is.EqualTo('o'));
+        Assert.That(_screen.CursorCol, Is.EqualTo(5));
+    }
 }

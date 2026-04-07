@@ -688,7 +688,19 @@ public class WmuxServer
                     return -1;
                 }
 
-                return port;
+                // Verify the port is actually listening — PID reuse on Windows
+                // can cause a different process to match the stale lock file.
+                try
+                {
+                    using var tcp = new System.Net.Sockets.TcpClient();
+                    tcp.Connect("127.0.0.1", port);
+                    return port;
+                }
+                catch (System.Net.Sockets.SocketException)
+                {
+                    RemoveLockFile();
+                    return -1;
+                }
             }
             catch (ArgumentException)
             {

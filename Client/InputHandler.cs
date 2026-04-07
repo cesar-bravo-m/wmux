@@ -245,15 +245,6 @@ public class InputHandler
             // The current key continues through normal processing below.
         }
 
-        // Ctrl+D — always close the active pane.
-        // On Windows, PowerShell/cmd don't use Ctrl+D as EOF,
-        // so wmux intercepts it unconditionally.
-        if (key.Key == ConsoleKey.D && key.Modifiers == ConsoleModifiers.Control)
-        {
-            RequestClosePane?.Invoke();
-            return true;
-        }
-
         // Prefix is active — handle bound keys
         if (_state == PrefixState.Active)
         {
@@ -464,13 +455,6 @@ public class InputHandler
         {
             if (ProcessPrefixSequence(key))
                 return true;
-        }
-
-        // Ctrl+D — always close the active pane.
-        if (key.Key == ConsoleKey.D && key.Modifiers == ConsoleModifiers.Control)
-        {
-            action = "kill-pane";
-            return true;
         }
 
         // Prefix is active — handle bound keys

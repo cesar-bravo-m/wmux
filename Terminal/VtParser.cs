@@ -12,6 +12,7 @@ public class VtParser
     private readonly List<int> _params = new();
     private int _currentParam = -1;
     private char _intermediateChar = '\0';
+    private bool _hasColonParams;
     private readonly List<char> _oscString = new();
 
     public void Process(ScreenBuffer screen, ReadOnlySpan<char> data)
@@ -83,6 +84,7 @@ public class VtParser
                 _params.Clear();
                 _currentParam = -1;
                 _intermediateChar = '\0';
+                _hasColonParams = false;
                 break;
             case ']': // OSC
                 _state = State.OscString;
@@ -140,8 +142,9 @@ public class VtParser
             return;
         }
 
-        if (ch == ';')
+        if (ch == ';' || ch == ':')
         {
+            if (ch == ':') _hasColonParams = true;
             _params.Add(_currentParam < 0 ? 0 : _currentParam);
             _currentParam = -1;
             _state = State.CsiParam;
@@ -243,7 +246,10 @@ public class VtParser
                 screen.CursorRow = Math.Clamp(Param(0, 1) - 1, 0, screen.Height - 1);
                 break;
             case 'm': // Set Graphics Rendition
-                screen.SetGraphicsRendition(_params.Count == 0 ? [0] : _params.ToArray());
+                var sgrParams = _params.Count == 0 ? new int[] { 0 } : _params.ToArray();
+                if (_hasColonParams)
+                    sgrParams = NormalizeColonSgr(sgrParams);
+                screen.SetGraphicsRendition(sgrParams);
                 break;
             case 'r': // Set scroll region
                 screen.SetScrollRegion(Param(0, 1) - 1, Param(1, screen.Height) - 1);
@@ -293,6 +299,31 @@ public class VtParser
                 }
                 break;
         }
+    }
+
+    /// <summary>
+    /// Converts colon-format SGR params (38:2:CS:R:G:B) to semicolon-format (38;2;R;G;B)
+    /// by removing the color space ID sub-parameter.
+    /// </summary>
+    private static int[] NormalizeColonSgr(int[] p)
+    {
+        var result = new List<int>(p.Length);
+        for (int i = 0; i < p.Length; i++)
+        {
+            result.Add(p[i]);
+            if ((p[i] == 38 || p[i] == 48) &&
+                i + 1 < p.Length && p[i + 1] == 2 &&
+                i + 5 < p.Length)
+            {
+                // Colon format: 38:2:CS:R:G:B → 38,2,R,G,B (skip color space at i+2)
+                result.Add(2);
+                result.Add(p[i + 3]);
+                result.Add(p[i + 4]);
+                result.Add(p[i + 5]);
+                i += 5;
+            }
+        }
+        return result.ToArray();
     }
 
     private void ProcessOsc(ScreenBuffer screen, char ch)
