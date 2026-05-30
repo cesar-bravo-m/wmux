@@ -137,6 +137,21 @@ public sealed class Win32InputReader : IDisposable
         bool alt = (ctrlState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
         bool ctrl = (ctrlState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
 
+        // AltGr (the right Alt key) is reported by Windows as the combination
+        // LEFT_CTRL_PRESSED + RIGHT_ALT_PRESSED. On layouts such as
+        // US-International this composes accented characters (á, é, í, ó, ú, …),
+        // and the composed character is already delivered in UnicodeChar.
+        // Treat such a printable AltGr character as literal input by clearing the
+        // synthetic Ctrl/Alt modifiers — otherwise AltGr+a would be misread as a
+        // Ctrl+A chord (emitting \x01, which PSReadLine interprets as "line start").
+        bool altGr = (ctrlState & RIGHT_ALT_PRESSED) != 0
+                  && (ctrlState & LEFT_CTRL_PRESSED) != 0;
+        if (altGr && ch >= ' ' && ch != '\x7f')
+        {
+            ctrl = false;
+            alt = false;
+        }
+
         ConsoleKey consoleKey = MapVirtualKeyToConsoleKey(vk);
 
         // For Ctrl+letter, the UnicodeChar comes through as 0x01-0x1A.
